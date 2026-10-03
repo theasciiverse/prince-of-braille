@@ -20,6 +20,7 @@ mod mover;
 mod render;
 mod seq;
 mod subs;
+mod theme;
 
 use apple::Screen;
 use game::{Game, Phase, FPS};
@@ -38,6 +39,7 @@ struct App {
     game: Game,
     screen: Screen,
     glyphs: Glyphs,
+    theme: theme::Theme,
     /// 0 = fit automatically, else forced 1 or 2
     scale: i32,
     paused: bool,
@@ -46,7 +48,7 @@ struct App {
 }
 
 fn usage() -> ! {
-    eprintln!("usage: prince-of-braille [LEVEL]   (1-14, default 1)");
+    eprintln!("usage: prince-of-braille [--theme dusk|phosphor|amber|classic] [LEVEL]   (level 1-14, default 1)");
     std::process::exit(2);
 }
 
@@ -54,16 +56,20 @@ fn main() -> io::Result<()> {
     env_logger::init();
     let mut level = 1u8;
     let mut dump: Option<String> = None;
+    let mut theme = theme::load().unwrap_or(theme::Theme::Dusk);
     let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {
         match a.as_str() {
             "-h" | "--help" => usage(),
             "--dump" => dump = Some(args.next().unwrap_or_default()),
+            "--theme" => {
+                theme = args.next().as_deref().and_then(theme::Theme::from_name).unwrap_or_else(|| usage());
+            }
             n => level = n.parse().ok().filter(|v| (1..=14).contains(v)).unwrap_or_else(|| usage()),
         }
     }
     if let Some(script) = dump {
-        dump_frames(level, &script);
+        dump_frames(level, &script, theme);
         return Ok(());
     }
     let mut terminal = ratatui::init();
@@ -75,7 +81,7 @@ fn main() -> io::Result<()> {
         execute!(io::stdout(), PushKeyboardEnhancementFlags(flags))?;
     }
     log::info!("start level={level} exact_keys={exact}");
-    let result = run(&mut terminal, level, exact);
+    let result = run(&mut terminal, level, exact, theme);
     if exact {
         let _ = execute!(io::stdout(), PopKeyboardEnhancementFlags);
     }
@@ -83,11 +89,12 @@ fn main() -> io::Result<()> {
     result
 }
 
-fn run(terminal: &mut DefaultTerminal, level: u8, exact: bool) -> io::Result<()> {
+fn run(terminal: &mut DefaultTerminal, level: u8, exact: bool, theme: theme::Theme) -> io::Result<()> {
     let mut app = App {
         game: Game::new(level),
         screen: Screen::default(),
         glyphs: Glyphs::Hybrid,
+        theme,
         scale: 0,
         paused: false,
         confirm_quit: false,
@@ -149,7 +156,7 @@ fn run(terminal: &mut DefaultTerminal, level: u8, exact: bool) -> io::Result<()>
 /// Headless run for testing: `--dump "R:12 .:6 U:1 =:3"` holds the given
 /// keys (L R U D B, `.` none) for N frames each and prints the screen as
 /// text after every token. A token starting with `=` just prints.
-fn dump_frames(level: u8, script: &str) {
+fn dump_frames(level: u8, script: &str, theme: theme::Theme) {
     let mut g = Game::new(level);
     let mut scr = Screen::default();
     let (w, h) = render::cells_needed(1);
@@ -182,7 +189,7 @@ fn dump_frames(level: u8, script: &str) {
             let _ = std::fs::write(format!("{dir}/{:03}.ppm", g.ticks), out);
         }
         let mut buf = ratatui::buffer::Buffer::empty(Rect::new(0, 0, w, h + 1));
-        render::paint_screen(&mut buf, Rect::new(0, 0, w, h), &scr, 1, Glyphs::Hybrid);
+        render::paint_screen(&mut buf, Rect::new(0, 0, w, h), &scr, 1, Glyphs::Hybrid, theme, g.level.palace());
         render::paint_status(&mut buf, Rect::new(0, h, w, 1), &g, "");
         let k = &g.kid;
         println!(
@@ -249,6 +256,10 @@ fn handle(app: &mut App, cmd: Cmd) {
             g.start_level(n, true);
         }
         Cmd::Glyphs => app.glyphs = app.glyphs.next(),
+        Cmd::Theme => {
+            app.theme = app.theme.next();
+            theme::save(app.theme);
+        }
         Cmd::Scale => {
             app.scale = match app.scale {
                 0 => 2,
@@ -290,8 +301,8 @@ fn draw(f: &mut ratatui::Frame, app: &mut App, input: &Input) {
     bg::draw(&mut app.screen, &app.game);
     let ox = area.x + (area.width - w) / 2;
     let oy = area.y + (area.height - h - 1) / 2;
-    render::paint_screen(buf, Rect::new(ox, oy, w, h), &app.screen, scale, app.glyphs);
-    let mut note = format!("{} {}x", app.glyphs.name(), scale);
+    render::paint_screen(buf, Rect::new(ox, oy, w, h), &app.screen, scale, app.glyphs, app.theme, app.game.level.palace());
+    let mut note = format!("{} {} {}x", app.theme.name(), app.glyphs.name(), scale);
     if input.mode == input::Mode::Timing {
         note.push_str(" keys:timing");
     }

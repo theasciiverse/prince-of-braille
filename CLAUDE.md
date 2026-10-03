@@ -132,14 +132,25 @@ and orange accents a colour monitor showed. Each 2x4 cell then gets:
 - the **dungeon in block glyphs** (full, half, quadrant, quarter) with
   fg/bg colour from a 2-means split of the cell, which gives the stone real
   definition; Braille only where no block glyph fits (thin detail).
-`g` cycles hybrid / Braille-only / blocks-only for comparison. Below
+`g` cycles hybrid / Braille-only / blocks-only for comparison.
+
+**Colour themes** (`src/theme.rs`): David wanted an updated scheme rather
+than the old Apple II colours, with a choice. A theme keeps the NTSC
+picture's brightness (where the brick faces, mortar and highlights live)
+and its accent cue (warm pixels in the dungeon, cool ones in the palace),
+and repaints hues by what each pixel is: stone, floor, gate, flame,
+potion, sword, prince. Themes: `dusk` (default: slate dungeon, sandstone
+palace with teal tiles, amber torchlight), `phosphor` (green with amber),
+`amber`, `classic` (the Apple colours unchanged). `c` cycles in game and
+the choice is saved to `~/.config/prince-of-braille/theme`;
+`--theme NAME` overrides for one run. Below
 140x49 cells it renders at half scale (`f` forces 1x or 2x).
 
 **Controls:** arrows / WASD / hjkl, Home/PgUp or q/e for diagonal jumps,
 Shift or Space = button (grab, careful step, pick up/drink). With the kitty
 keyboard protocol keys are exact (real releases, chords); elsewhere held
 keys are inferred from OS key repeat. `r` restart level, `n`/`b` next/prev
-level, `p` pause, Esc Esc quit.
+level, `p` pause, `c` colour theme, `g` glyph mode, `f` scale, Esc Esc quit.
 
 **Debugging:** `RUST_LOG=debug prince-of-braille 2>pob.log` logs every key,
 state changes and a 500 ms state snapshot. `--dump "R:12 .:6 U:1"` runs

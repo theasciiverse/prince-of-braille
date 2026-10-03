@@ -13,6 +13,7 @@
 
 use crate::apple::{Ink, Screen, SCREEN_H, SCREEN_W};
 use crate::game::{Game, Phase};
+use crate::theme::Theme;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier, Style};
@@ -176,8 +177,24 @@ fn dot(scr: &Screen, col: &[[u8; 3]], x: i32, y: i32, scale: i32) -> (bool, [u8;
 }
 
 /// Paint the Apple screen into `area` at `scale`.
-pub fn paint_screen(buf: &mut Buffer, area: Rect, scr: &Screen, scale: i32, glyphs: Glyphs) {
-    let col = scr.colors();
+pub fn paint_screen(buf: &mut Buffer, area: Rect, scr: &Screen, scale: i32, glyphs: Glyphs, theme: Theme, palace: bool) {
+    let mut col = scr.colors();
+    if theme != Theme::Classic {
+        let w = SCREEN_W as usize;
+        for (i, c) in col.iter_mut().enumerate() {
+            // stipple gaps carry no ink of their own: borrow a neighbour's
+            let mut ink = scr.px[i];
+            if ink == Ink::None {
+                let x = i % w;
+                if x > 0 && scr.px[i - 1] != Ink::None {
+                    ink = scr.px[i - 1];
+                } else if x + 1 < w && scr.px[i + 1] != Ink::None {
+                    ink = scr.px[i + 1];
+                }
+            }
+            *c = theme.apply(palace, ink, *c);
+        }
+    }
     let (cw, ch) = cells_needed(scale);
     for cy in 0..ch.min(area.height) {
         for cx in 0..cw.min(area.width) {
@@ -197,7 +214,8 @@ pub fn paint_screen(buf: &mut Buffer, area: Rect, scr: &Screen, scale: i32, glyp
             }
             let (mut ch_, mut style) = cell(kid, &dots, glyphs);
             if kid != 0 {
-                style = style.fg(kid_color(mean(kid_cols.into_iter())));
+                let m = mean(kid_cols.into_iter());
+                style = style.fg(if theme == Theme::Classic { kid_color(m) } else { color(m) });
             }
             if ch_ == '\0' {
                 ch_ = ' ';
