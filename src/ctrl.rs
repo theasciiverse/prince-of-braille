@@ -1,0 +1,822 @@
+//! Player control and floor checks: a port of CTRL.S.
+//!
+//! Each routine keeps its original name and shape. The joystick model is
+//! the original's: `jstk_x` < 0 means forward (input is turned to face the
+//! character before GENCTRL runs), and each direction has a `clr` flag that
+//! latches a fresh press until something uses it.
+
+use crate::game::*;
+use crate::level::{is_space, obj};
+use crate::seq::{seq as s, FCHECKMARK};
+
+const DEATH_VELOCITY: u8 = 33;
+const OOF_VELOCITY: u8 = 22;
+const GRABREACH: u8 = (-8i8) as u8;
+const GRABSPEED: u8 = 32;
+const GRABLEAD: u8 = 25;
+const STUNTIME: u8 = 12;
+const JUMPUPREACH: u8 = 0;
+const JUMPUPANGLE: u8 = (-6i8) as u8;
+const JUMP_BACK_THRES: u8 = 6;
+const STEP_OFF_FWD: u8 = 3;
+const STEP_OFF_BACK: u8 = 8;
+const GCLIMBTHRES: u8 = 6;
+const STAIRTHRES: u8 = 30;
+
+const RJ_CHANGE: u8 = 4;
+const RJ_LOOKAHEAD: u8 = 1;
+const RJ_LEAD_DIST: u8 = 14;
+const RJ_MAX_FUJ_BAK: u8 = 8;
+const RJ_MAX_FUJ_FWD: u8 = 2;
+
+fn fresh(c: i8) -> bool {
+    c < 0
+}
+
+impl Game {
+    /// ]clr: mark every press as used.
+    fn clrall(&mut self) {
+        self.joy.clr_b = 0;
+        self.joy.clr_f = 0;
+        self.joy.clr_u = 0;
+        self.joy.clr_d = 0;
+    }
+
+    /// PLAYERCTRL + CLRJSTK + UserCtrl (facejstk).
+    pub fn playerctrl(&mut self, c: Controls) {
+        if self.kid.life & 0x80 != 0 && self.kid_strength == 0 {
+            self.kid.life = 0;
+        }
+        if self.stunned != 0 {
+            self.stunned -= 1;
+        }
+        // getselect: raw joystick in screen terms, flags stored as if facing L
+        self.joy.jstk_x = c.x;
+        self.joy.jstk_y = c.y;
+        self.joy.btn = c.btn;
+        self.clrjstk();
+        let facing_right = !self.face_left();
+        if facing_right {
+            self.facejstk();
+        }
+        self.genctrl();
+        if facing_right {
+            self.facejstk();
+        }
+    }
+
+    fn facejstk(&mut self) {
+        self.joy.jstk_x = -self.joy.jstk_x;
+        std::mem::swap(&mut self.joy.clr_f, &mut self.joy.clr_b);
+    }
+
+    /// CLRJSTK: 0 -> -1 on a press, 1 -> 0 on release, -1 stays.
+    fn clrjstk(&mut self) {
+        fn upd(clr: &mut i8, down: bool) {
+            if *clr < 0 {
+                return;
+            }
+            if down {
+                if *clr == 0 {
+                    *clr = -1;
+                }
+            } else {
+                *clr = 0;
+            }
+        }
+        let j = self.joy;
+        upd(&mut self.joy.clr_f, j.jstk_x < 0);
+        upd(&mut self.joy.clr_b, j.jstk_x == 1);
+        upd(&mut self.joy.clr_u, j.jstk_y < 0);
+        upd(&mut self.joy.clr_d, j.jstk_y == 1);
+        upd(&mut self.joy.clr_btn, j.btn);
+    }
+
+    /// GENCTRL
+    fn genctrl(&mut self) {
+        if self.kid.life & 0x80 == 0 {
+            if matches!(self.kid.posn, 15 | 166 | 158 | 171) {
+                self.jumpseq(s::DROPDEAD);
+            }
+            return;
+        }
+        if matches!(self.kid.action, 4 | 5) {
+            self.clrall();
+            return;
+        }
+        let x = self.kid.posn;
+        if x == 15 {
+            return self.standing();
+        }
+        if x == 48 {
+            return self.turning();
+        }
+        if (50..53).contains(&x) {
+            return self.standing();
+        }
+        if x < 4 {
+            return self.starting();
+        }
+        if (67..70).contains(&x) {
+            return self.stjumpup();
+        }
+        if x < 15 {
+            return self.arunning();
+        }
+        if (87..100).contains(&x) {
+            return self.hanging();
+        }
+        if x == 109 {
+            self.crouching();
+        }
+    }
+
+    fn standing(&mut self) {
+        if fresh(self.joy.clr_btn) && self.joy.btn && self.trypickup() {
+            return;
+        }
+        if self.joy.btn {
+            if fresh(self.joy.clr_b) {
+                return self.doturn();
+            }
+            if fresh(self.joy.clr_u) {
+                return self.standing_up();
+            }
+            if fresh(self.joy.clr_d) {
+                return self.standing_down();
+            }
+            if self.joy.jstk_x >= 0 {
+                return;
+            }
+            if fresh(self.joy.clr_f) {
+                self.dostepfwd();
+            }
+            return;
+        }
+        if fresh(self.joy.clr_f) {
+            return self.dostartrun();
+        }
+        if fresh(self.joy.clr_b) {
+            return self.doturn();
+        }
+        if fresh(self.joy.clr_u) {
+            return self.standing_up();
+        }
+        if fresh(self.joy.clr_d) {
+            return self.standing_down();
+        }
+        if self.joy.jstk_x < 0 {
+            self.dostartrun();
+        }
+    }
+
+    fn standing_up(&mut self) {
+        // In front of open stairs?
+        let mut stairs = self.getunderft() == obj::EXIT;
+        if !stairs {
+            stairs = self.getbehind() == obj::EXIT;
+        }
+        if !stairs {
+            stairs = self.getinfront() == obj::EXIT;
+        }
+        if stairs && (self.spec() >> 2) >= STAIRTHRES {
+            return self.stairs();
+        }
+        if self.joy.jstk_x < 0 {
+            return self.dostandjump();
+        }
+        self.dojumpup();
+    }
+
+    fn standing_down(&mut self) {
+        self.joy.clr_d = 1;
+        // facing an edge: step off it
+        let id = self.getinfront();
+        if is_space(id) && self.getdist() < STEP_OFF_FWD {
+            self.kid.x = self.addcharx(5);
+            self.rereadblocks();
+            return;
+        }
+        // back to an edge: climb down and hang
+        let id = self.getbehind();
+        if is_space(id) && self.getdist() >= STEP_OFF_BACK {
+            self.blockid = self.getbehind();
+            let under = self.getunderft();
+            if self.checkledge(under) {
+                let ok = if self.face_left() && self.getunderft() == obj::GATE {
+                    (self.spec() >> 2) >= GCLIMBTHRES
+                } else {
+                    true
+                };
+                if ok {
+                    let d = self.getdist().wrapping_sub(9);
+                    self.kid.x = self.addcharx(d);
+                    self.jumpseq(s::CLIMBDOWN);
+                    return;
+                }
+            }
+        }
+        self.docrouch();
+    }
+
+    fn stairs(&mut self) {
+        let bx = self.rd.bx as i8;
+        self.kid.x = getblockej(bx).wrapping_add(10);
+        self.kid.face = FACE_LEFT;
+        self.jumpseq(s::CLIMBSTAIRS);
+        log::info!("climbing stairs");
+    }
+
+    fn crouching(&mut self) {
+        if fresh(self.joy.clr_btn) && self.trypickup() {
+            return;
+        }
+        if self.joy.jstk_y != 1 {
+            self.jumpseq(s::STANDUP);
+            return;
+        }
+        if fresh(self.joy.clr_f) {
+            self.joy.clr_f = 1;
+            self.jumpseq(s::CRAWL);
+        }
+    }
+
+    fn starting(&mut self) {
+        if self.joy.jstk_y < 0 && self.joy.jstk_x < 0 {
+            self.dostandjump();
+        }
+    }
+
+    fn stjumpup(&mut self) {
+        if self.joy.jstk_x < 0 || fresh(self.joy.clr_f) {
+            self.dostandjump();
+        }
+    }
+
+    fn turning(&mut self) {
+        if self.joy.btn || self.joy.jstk_x >= 0 || self.joy.jstk_y < 0 {
+            return;
+        }
+        self.jumpseq(s::TURNRUN);
+    }
+
+    fn arunning(&mut self) {
+        if self.joy.jstk_x == 0 {
+            // stop running
+            if matches!(self.kid.posn, 7 | 11) {
+                self.clrall();
+                self.joy.clr_f = 1;
+                self.jumpseq(s::RUNSTOP);
+            }
+            return;
+        }
+        if self.joy.jstk_x > 0 {
+            self.clrall();
+            self.joy.clr_b = 1;
+            self.jumpseq(s::RUNTURN);
+            return;
+        }
+        if self.joy.jstk_y < 0 {
+            if fresh(self.joy.clr_u) {
+                self.dorunjump();
+            }
+            return;
+        }
+        if fresh(self.joy.clr_d) {
+            self.joy.clr_d = 1;
+            self.jumpseq(s::RDIVEROLL);
+        }
+    }
+
+    fn hanging(&mut self) {
+        if self.stunned == 0 && self.joy.jstk_y < 0 {
+            return self.climbup();
+        }
+        if !self.joy.btn {
+            return self.hangdrop();
+        }
+        if self.kid.action != 6 {
+            let id = self.getunderft();
+            if id == obj::BLOCK || (self.face_left() && matches!(id, obj::PANELWIF | obj::PANELWOF)) {
+                self.jumpseq(s::HANGSTRAIGHT);
+                return;
+            }
+        }
+        // if the ledge crumbles away, fall with it
+        let id = self.getabove();
+        if is_space(id) {
+            self.hangdrop();
+        }
+    }
+
+    fn climbup(&mut self) {
+        self.clrall();
+        self.joy.clr_btn = 1;
+        let id = self.getabove();
+        let ok = match id {
+            obj::MIRROR | obj::SLICER => self.face_left(),
+            obj::GATE => !self.face_left() || (self.spec() >> 2) >= GCLIMBTHRES,
+            _ => true,
+        };
+        self.jumpseq(if ok { s::CLIMBUP } else { s::CLIMBFAIL });
+    }
+
+    fn hangdrop(&mut self) {
+        self.clrall();
+        self.joy.clr_d = 1;
+        let behind = self.getbehind();
+        if is_space(behind) && is_space(self.getunderft()) {
+            self.jumpseq(s::HANGFALL);
+            return;
+        }
+        let id = self.getunderft();
+        let sheer = id == obj::BLOCK || (self.face_left() && matches!(id, obj::PANELWOF | obj::PANELWIF));
+        if sheer {
+            self.kid.x = self.addcharx((-7i8) as u8);
+        }
+        self.jumpseq(s::HANGDROP);
+    }
+
+    fn dostartrun(&mut self) {
+        let (d, what) = self.getfwddist();
+        if what == 1 && self.rd.id != obj::SLICER && d < 8 {
+            if fresh(self.joy.clr_f) {
+                self.dostepfwd();
+            }
+            return;
+        }
+        self.jumpseq(s::STARTRUN);
+    }
+
+    fn doturn(&mut self) {
+        self.clrall();
+        self.joy.clr_b = 1;
+        self.jumpseq(s::TURN);
+    }
+
+    fn dostandjump(&mut self) {
+        self.joy.clr_u = 1;
+        self.joy.clr_f = 1;
+        self.jumpseq(s::STANDJUMP);
+    }
+
+    fn docrouch(&mut self) {
+        self.jumpseq(s::STOOP);
+        self.clrall();
+        self.joy.clr_d = 1;
+    }
+
+    fn dojumpup(&mut self) {
+        self.clrall();
+        self.joy.clr_u = 1;
+        self.blockid = self.getabove();
+        let a = self.getaboveinf();
+        if self.checkledge(a) {
+            return self.dojumphang();
+        }
+        self.blockid = self.getabovebeh();
+        let a = self.getabove();
+        if self.checkledge(a) {
+            // jump back to grab the block directly overhead
+            if self.getdist() < JUMP_BACK_THRES {
+                return self.dojumphigh();
+            }
+            if is_space(self.getbehind()) {
+                // back to the ledge: jumpbackhang
+                self.getabove();
+                let d = self.getdist().wrapping_sub(10);
+                self.kid.x = self.addcharx(d);
+                self.jumpseq(s::JUMPBACKHANG);
+                return;
+            }
+            let d = self.getdist().wrapping_sub(14);
+            self.kid.x = self.addcharx(d);
+            self.rereadblocks();
+            return self.dojumphang();
+        }
+        self.dojumphigh();
+    }
+
+    fn dojumphang(&mut self) {
+        self.getaboveinf();
+        let atemp = self.getdist();
+        let long = if atemp < 4 {
+            let (d, what) = self.getfwddist();
+            d < 4 && what == 1
+        } else {
+            true
+        };
+        if long {
+            self.kid.x = self.addcharx(atemp.wrapping_sub(4));
+            self.jumpseq(s::JUMPHANG_LONG);
+        } else {
+            self.kid.x = self.addcharx(atemp);
+            self.jumpseq(s::JUMPHANG_MED);
+        }
+    }
+
+    /// DoRunjump: calibrate so the foot pushes off at the edge.
+    fn dorunjump(&mut self) {
+        if self.kid.posn < 7 {
+            return;
+        }
+        let ztemp = self.addcharx(RJ_CHANGE);
+        let mut bx = getblockxp(ztemp).0 as i32;
+        let mut count = 0u8;
+        let mut edge = false;
+        loop {
+            bx += if self.face_left() { -1 } else { 1 };
+            let (sc, by) = (self.kid.scrn, self.kid.block_y as i8 as i32);
+            let id = self.rdblock(sc, bx, by);
+            if id == obj::SPIKES || is_space(id) {
+                edge = true;
+                break;
+            }
+            count += 1;
+            if count >= RJ_LOOKAHEAD + 1 {
+                break;
+            }
+        }
+        if edge {
+            let a = self
+                .getdist1(ztemp)
+                .wrapping_add(7 * count)
+                .wrapping_add(7 * count)
+                .wrapping_sub(RJ_LEAD_DIST);
+            let fudge = if a >= RJ_MAX_FUJ_BAK.wrapping_neg() || a < RJ_MAX_FUJ_FWD {
+                a
+            } else if a < 0x80 {
+                return; // still too far away: wait till next frame
+            } else {
+                (-3i8) as u8 // jumped too late; make it look good anyway
+            };
+            self.kid.x = self.addcharx(fudge.wrapping_add(RJ_CHANGE));
+        }
+        self.clrall();
+        self.joy.clr_u = 1;
+        self.jumpseq(s::RUNJUMP);
+    }
+
+    fn dostepfwd(&mut self) {
+        self.joy.clr_f = 1;
+        self.joy.clr_btn = 1;
+        let (d, what) = self.getfwddist();
+        let step = if d != 0 {
+            d
+        } else if what == 1 || self.kid.repeat == 0 {
+            // barrier: step through; second try at an edge: step off
+            11
+        } else {
+            // first time at an edge: test with the foot
+            self.kid.repeat = 0;
+            self.jumpseq(s::TESTFOOT);
+            return;
+        };
+        self.kid.repeat = step;
+        // stepfwd1..13 are sequences 29..41; fullstep (42) is step 14
+        self.jumpseq(s::STEPFWD1 - 1 + step);
+    }
+
+    fn dojumphigh(&mut self) {
+        self.clrall();
+        self.joy.clr_u = 1;
+        let (d, what) = self.getfwddist();
+        if d < 4 && what == 1 {
+            self.kid.x = self.addcharx(d.wrapping_sub(3));
+        }
+        let ztemp = self.facedx(JUMPUPREACH);
+        let a = self.getbasex().wrapping_add(JUMPUPANGLE).wrapping_add(ztemp);
+        let bx = getblockx(a).0 as i32;
+        let (sc, by) = (self.kid.scrn, self.kid.block_y as i8 as i32 - 1);
+        let id = self.rdblock(sc, bx, by);
+        if id == obj::BLOCK || !is_space(id) {
+            self.jumpseq(s::JUMPUP);
+        } else {
+            self.jumpseq(s::HIGHJUMP);
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // CHECKFLOOR and friends
+
+    pub fn checkfloor(&mut self) {
+        match self.kid.action {
+            6 | 2 => {}
+            5 => {
+                if matches!(self.kid.posn, 109 | 185) {
+                    self.onground();
+                }
+            }
+            4 => self.falling(),
+            3 => {
+                if (102..106).contains(&self.kid.posn) {
+                    self.fallon();
+                }
+            }
+            _ => self.onground(),
+        }
+    }
+
+    fn floor_y(&self, by_plus1: i32) -> u8 {
+        FLOOR_Y[by_plus1.clamp(0, 4) as usize]
+    }
+
+    /// If he's passed through the floor plane, change CharBlockY; if the
+    /// floor is solid, stop him.
+    fn falling(&mut self) {
+        let by = self.kid.block_y as i8 as i32;
+        if self.kid.y < self.floor_y(by + 1) {
+            return self.fallon();
+        }
+        let mut id = self.getunderft();
+        if id == obj::BLOCK {
+            id = self.insideblock();
+        }
+        if is_space(id) {
+            self.kid.block_y = self.kid.block_y.wrapping_add(1);
+            return;
+        }
+        self.hitflr();
+    }
+
+    fn hitflr(&mut self) {
+        let by = self.kid.block_y as i8 as i32;
+        self.kid.y = self.floor_y(by + 1);
+        if self.getunderft() == obj::SPIKES {
+            if self.getspikes() != 0 {
+                return self.doimpale();
+            }
+        } else {
+            // landed too close to an edge?
+            let id = self.getinfront();
+            if is_space(id) && self.getdist() < 4 {
+                self.kid.x = self.addcharx((-3i8) as u8);
+            }
+            if self.kid.life & 0x80 != 0 {
+                let mut spikes = false;
+                if self.getdist() >= 12 && self.getbehind() == obj::SPIKES {
+                    spikes = true;
+                }
+                if !spikes && self.getunderft() == obj::SPIKES {
+                    spikes = true;
+                }
+                if spikes && self.getspikes() != 0 {
+                    return self.doimpale();
+                }
+            }
+        }
+        let seq = if self.kid.life & 0x80 == 0 {
+            self.add_sound(Sound::Splat);
+            s::HARDLAND
+        } else if self.kid.yvel < OOF_VELOCITY {
+            if self.kid.sword == 2 {
+                s::LANDENGARDE
+            } else {
+                s::SOFTLAND
+            }
+        } else if self.kid.yvel < DEATH_VELOCITY {
+            self.add_sound(Sound::Splat);
+            if self.decstr(1) {
+                s::MEDLAND
+            } else {
+                s::HARDLAND
+            }
+        } else {
+            self.decstr(100);
+            self.add_sound(Sound::Splat);
+            s::HARDLAND
+        };
+        log::debug!("land yvel={} seq={}", self.kid.yvel, seq);
+        self.jumpseq(seq);
+        self.animchar();
+        self.kid.yvel = 0;
+    }
+
+    /// Hasn't hit the floor yet: can he grab the edge above?
+    fn fallon(&mut self) {
+        if !(self.joy.btn && self.kid.life & 0x80 != 0) {
+            return;
+        }
+        if self.kid.yvel >= GRABSPEED {
+            return;
+        }
+        let by = self.kid.block_y as i8 as i32;
+        if self.kid.y.wrapping_add(GRABLEAD) < self.floor_y(by + 1) {
+            return;
+        }
+        self.savekidx = self.kid.x;
+        self.kid.x = self.addcharx(GRABREACH);
+        self.rereadblocks();
+        self.blockid = self.getabove();
+        let a = self.getaboveinf();
+        if !self.checkledge(a) {
+            self.kid.x = self.savekidx;
+            self.rereadblocks();
+            return;
+        }
+        let d = self.getdist();
+        self.kid.x = self.addcharx(d);
+        let by = self.kid.block_y as i8 as i32;
+        self.kid.y = self.floor_y(by + 1);
+        self.kid.yvel = 0;
+        self.jumpseq(s::FALLHANG);
+        self.animchar();
+        self.stunned = STUNTIME;
+        log::debug!("grabbed ledge");
+    }
+
+    /// Is there floor underfoot? If not, start to fall.
+    fn onground(&mut self) {
+        if self.frame.check & FCHECKMARK == 0 {
+            return;
+        }
+        let mut id = self.getunderft();
+        if id == obj::BLOCK {
+            id = self.insideblock();
+        }
+        if !is_space(id) {
+            return;
+        }
+        self.startfall();
+    }
+
+    fn startfall(&mut self) {
+        self.kid.sword = 0;
+        self.kid.block_y = self.kid.block_y.wrapping_add(1);
+        let p = self.kid.posn;
+        self.rjumpflag = p;
+        log::debug!("startfall from posn {p}");
+        let seq = match p {
+            9 => s::STEPFALL,
+            13 => s::STEPFALL2,
+            26 => s::JUMPFALL,
+            44 => s::RJUMPFALL,
+            81..=85 => {
+                self.kid.x = self.addcharx(5);
+                self.rereadblocks();
+                s::STEPFALL2
+            }
+            150..=179 => s::FIGHTFALL,
+            _ => s::STEPFALL,
+        };
+        self.jumpseq(seq);
+        self.animchar();
+        self.rereadblocks();
+        let id = self.getunderft();
+        if self.cmpwall(id) {
+            self.insideblock();
+            return;
+        }
+        let id = self.getinfront();
+        if !self.cmpwall(id) {
+            return;
+        }
+        // CDpatch
+        if self.rjumpflag == 44 && self.getdist() < 6 {
+            self.jumpseq(s::PATCHFALL);
+            self.animchar();
+            self.rereadblocks();
+            return;
+        }
+        self.kid.x = self.addcharx(0xff);
+        self.rereadblocks();
+    }
+
+    /// Char is "inside" a block: bump him outside, hopefully the way he came.
+    fn insideblock(&mut self) -> u8 {
+        let d = self.getdist();
+        let fwd = d < 8 && self.getinfront() != obj::BLOCK;
+        let delta = if fwd {
+            self.getdist().wrapping_add(4)
+        } else if self.getbehind() == obj::BLOCK {
+            (self.getdist().wrapping_add(14) ^ 0xff).wrapping_add(8)
+        } else {
+            (self.getdist() ^ 0xff).wrapping_add(8)
+        };
+        self.kid.x = self.addcharx(delta);
+        self.rereadblocks();
+        self.getunderft()
+    }
+
+    /// CHECKPRESS: stepping on a pressure plate or loose floor?
+    pub fn checkpress(&mut self) {
+        let p = self.kid.posn;
+        let hanging = (87..100).contains(&p) || (135..141).contains(&p);
+        let id = if hanging {
+            self.getabove()
+        } else {
+            if !matches!(self.kid.action, 7 | 5 | 0 | 1) {
+                return;
+            }
+            if p == 79 {
+                // jumping up to touch the ceiling
+                if self.getabove() == obj::LOOSE {
+                    self.breakloose(1);
+                }
+                return;
+            }
+            if self.frame.check & FCHECKMARK == 0 {
+                return;
+            }
+            self.getunderft()
+        };
+        match id {
+            obj::UPRESSPLATE | obj::PRESSPLATE => {
+                if self.kid.life & 0x80 != 0 {
+                    self.pushpp();
+                } else {
+                    self.jampp();
+                }
+            }
+            obj::LOOSE => {
+                self.alertguard = true;
+                self.breakloose(1);
+            }
+            _ => {}
+        }
+    }
+
+    /// CHECKIMPALE: running or jumping onto spikes.
+    pub fn checkimpale(&mut self) {
+        let (sc, bx, by) = (self.kid.scrn, self.kid.block_x as i8 as i32, self.kid.block_y as i8 as i32);
+        if self.rdblock(sc, bx, by) != obj::SPIKES {
+            return;
+        }
+        let p = self.kid.posn;
+        if p < 7 {
+            return;
+        }
+        if p < 15 {
+            if self.getspikes() >= 2 {
+                self.doimpale();
+            }
+            return;
+        }
+        if (p == 43 || p == 26) && self.getspikes() != 0 {
+            self.doimpale();
+        }
+    }
+
+    /// DOIMPALE (rd = the spikes)
+    pub fn doimpale(&mut self) {
+        self.jamspikes();
+        let by = self.kid.block_y as i8 as i32;
+        self.kid.y = self.floor_y(by + 1);
+        self.kid.x = getblockej(self.rd.bx as i8).wrapping_add(10);
+        self.kid.x = self.addcharx(8);
+        self.kid.yvel = 0;
+        self.add_sound(Sound::Impaled);
+        self.decstr(100);
+        self.jumpseq(s::IMPALE);
+        self.animchar();
+        log::info!("impaled");
+    }
+
+    /// TryPickup: true if something got picked up.
+    fn trypickup(&mut self) -> bool {
+        let id = self.getunderft();
+        if id == obj::FLASK || id == obj::SWORD {
+            if is_space(self.getbehind()) {
+                return false;
+            }
+            self.kid.x = self.addcharx((-14i8) as u8);
+            self.rereadblocks();
+        }
+        let id = self.getinfront();
+        if id == obj::FLASK || id == obj::SWORD {
+            self.pickitup(id);
+            return true;
+        }
+        false
+    }
+
+    fn pickitup(&mut self, id: u8) {
+        if self.kid.posn != 109 {
+            // crouch first, then pick up
+            let (d, what) = self.getfwddist();
+            if what != 2 {
+                self.kid.x = self.addcharx(d);
+            }
+            if !self.face_left() {
+                self.kid.x = self.addcharx((-2i8) as u8);
+            }
+            self.docrouch();
+            return;
+        }
+        if id == obj::SWORD {
+            self.removeobj(0xff);
+            self.jumpseq(s::PICKUPSWORD);
+        } else {
+            let n = self.spec() >> 5;
+            self.removeobj(n);
+            self.jumpseq(s::DRINKPOTION);
+        }
+    }
+
+    fn removeobj(&mut self, potion: u8) {
+        self.potion = potion;
+        self.joy.clr_btn = 1;
+        self.set_type(obj::FLOOR);
+        self.set_spec(0);
+    }
+}

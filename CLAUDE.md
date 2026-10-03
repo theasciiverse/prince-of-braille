@@ -1,0 +1,197 @@
+# Prince of Braille
+
+Asciiverse platformer. Rust + Ratatui + Drawille.
+Built from Jordan Mechner's released original Prince of Persia (1989) Apple II
+source code — a genuine restoration/reimagining, not a from-scratch clone.
+
+**Status:** Consolidated 2026-07-08 from design conversation; no prior file
+existed under this exact name (distinct from "Relief Paint," which briefly
+considered and then released this name for its own project).
+
+## Naming note
+
+"Prince of Braille" was briefly considered as a name for the REXPaint-extended
+sprite editor project before that editor was named Relief Paint instead — this
+name was reserved specifically for this game. Keep the two projects clearly
+separate in code, repos, and any outreach.
+
+## Premise
+
+Jordan Mechner released the original Apple II Prince of Persia source code
+himself in 2012 — found in a box in his parents' attic, and made public. He's
+been one of the most generous and open-handed creators in gaming history about
+his own work; a well-documented GitHub repository exists with the original
+assembly.
+
+Because the source is genuinely public, building from it is a restoration and
+reimagining, not a legally fraught port. The double meaning in the name is
+structural, not just wordplay: Prince of *Braille* — rendered *in* Braille
+Unicode block characters. The concept is made literal in the medium itself.
+
+## Why this works technically
+
+The original PoP movement system is built on rotoscoped video of Mechner's
+brother running and jumping — reduced to the essential geometry needed to run
+on Apple II hardware. The prince is recognisable entirely from silhouette: the
+running crouch, the sliding stop, the ledge hang, the careful testing step for
+floor traps.
+
+Braille dot patterns at sufficient resolution can render that silhouette with
+real fidelity, while a texture overlay layer handles the environment — stone
+walls, torchlight, dungeon depth. The rotoscoped source gives clean movement
+data to animate from; the harder problem is fluid character animation, not
+spatial representation.
+
+Mechner reduced human movement to its essential geometry to fit Apple II
+constraints. ASCII/Braille reduces visual representation to its essential
+characters under a comparable constraint. The two reduction philosophies are
+spiritually identical — find the minimum expression that still carries the
+truth of the thing.
+
+## Rendering approach — inherits directly from Terminal Orbit's architecture
+
+Terminal Orbit (katalystnord/terminal-orbit) already proved the core rendering
+approach needed here, just in a different visual domain:
+
+- **`canvas.rs` (the Drawille/Braille adapter)** — the rendering primitive
+  carries over directly. Sub-pixel resolution at 2× horizontal, 4× vertical
+  is what gives both games their visual quality.
+- **`texture.rs` (raycasted Lambert-lit texture system)** — in Terminal Orbit
+  this makes planets feel solid; here the equivalent is dungeon wall texture,
+  torchlight gradients, stone-and-shadow environment. Same technical approach,
+  different visual domain.
+- **`renderer/viewport.rs`** — wireframe ships become the prince's rotoscoped
+  silhouette. The original PoP movement system maps onto this renderer more
+  naturally than expected.
+
+Terminal Orbit proved the Braille viewport can handle full 3D spatial
+rendering with real physics. Prince of Braille is a comparatively simpler
+rendering problem — essentially 2.5D side-scrolling — but with far more
+demanding character animation requirements than Terminal Orbit needed.
+
+**Texture overlay layering:**
+- Stone texture in dungeon walls at one character density
+- Shadow gradients from torches at another
+- The prince himself in high-contrast Braille dots against the textured
+  background
+
+That layering is expected to produce something genuinely atmospheric in a
+terminal window — the target "magic moment" is the prince running full speed
+toward a gap, planting his foot, and leaping, rendered with motion blur
+through character density changes. That's the screenshot that goes everywhere
+on release.
+
+## Source and preservation angle
+
+Built directly from the original Apple II assembly source, movement faithful
+to Mechner's rotoscoping. This isn't just a game port — it's a legitimate
+piece of game preservation history, done with real understanding of how the
+original was constructed rather than guessed from playing the finished game.
+
+## Outreach — Jordan Mechner
+
+Not a permission request — the source is already public. A courtesy: telling
+him what's being built and why. He's active, thoughtful, and known to be
+genuinely interested in what people do with his work. Reasonable expectation
+he'd find this project appealing given how directly it honours the original
+construction method rather than just skinning a clone.
+
+(Cross-reference: track this contact in the Asciiverse outreach CLAUDE.md
+alongside the other developer/rights-holder contacts.)
+
+## What exists (first playable cut, 2026-10-03)
+
+Rust + Ratatui, `cargo run --release -- [LEVEL]` (1-14). It is a port of the
+original 6502 routines, run on the original data:
+
+| file | ported from | what |
+|------|-------------|------|
+| `tools/extract.py` | | reads the reference zip, copies the raw `IMG.*` image tables and `LEVEL*` blueprints to `assets/apple2/`, assembles `SEQTABLE.S` / `FRAMEDEF.S` with a tiny Merlin subset into `src/gen/` |
+| `src/apple.rs` | HIRES.S | image tables, 280x192 screen, AND/OR/STA/MASK lay, mirroring, NTSC colour |
+| `src/level.rs` | EQ.S | blueprint layout, RDBLOCK |
+| `src/seq.rs` | | sequence + frame tables |
+| `src/subs.rs` | CTRLSUBS.S, SUBS.S | ANIMCHAR, GETBASEX/GETDIST, SETUPCHAR, GETEDGES, CHECKLEDGE, gravity |
+| `src/ctrl.rs` | CTRL.S | all kid control: run, stop, turn, step, stand/run jump, jump up, hang, climb up/down, crouch, crawl, falling, grabbing, landing, impaling, pickups |
+| `src/coll.rs` | COLL.S | frame-to-frame barrier collision, bumps, GETFWDDIST |
+| `src/mover.rs` | MOVER.S | gates, pressure plates and links, loose floors and falling floor MOBs, spikes, exit door, torches, bubbling flasks |
+| `src/bg.rs` | FRAMEADV.S, BGDATA.S | screen drawing with the A/B/C/D/front piece system |
+| `src/game.rs` | TOPCTRL.S, AUTO.S | frame loop (DoKid order), screen cuts, timer, death, level progression |
+| `src/render.rs` | | terminal output (below) |
+| `src/input.rs` | SPECIALK.S | keys to joystick + clr flags |
+
+Variable and routine names follow the source, and byte arithmetic wraps the
+way the 6502's does, so the port can be read side by side with Mechner's code.
+
+**Rendering, as decided with David:** not Braille-only. The 280x192 screen
+is rebuilt pixel for pixel, then coloured by an NTSC model (560-dot line,
+palette-bit half-dot shift, 16 colours from a 4-dot window, horizontal
+blur). That turns the Apple's dither stipples into the solid light-blue stone
+and orange accents a colour monitor showed. Each 2x4 cell then gets:
+- the **prince in Braille** (his own pixel colours), which keeps the
+  rotoscoped animation fluid;
+- the **dungeon in block glyphs** (full, half, quadrant, quarter) with
+  fg/bg colour from a 2-means split of the cell, which gives the stone real
+  definition; Braille only where no block glyph fits (thin detail).
+`g` cycles hybrid / Braille-only / blocks-only for comparison. Below
+140x49 cells it renders at half scale (`f` forces 1x or 2x).
+
+**Controls:** arrows / WASD / hjkl, Home/PgUp or q/e for diagonal jumps,
+Shift or Space = button (grab, careful step, pick up/drink). With the kitty
+keyboard protocol keys are exact (real releases, chords); elsewhere held
+keys are inferred from OS key repeat. `r` restart level, `n`/`b` next/prev
+level, `p` pause, Esc Esc quit.
+
+**Debugging:** `RUST_LOG=debug prince-of-braille 2>pob.log` logs every key,
+state changes and a 500 ms state snapshot. `--dump "R:12 .:6 U:1"` runs
+headless with scripted input and prints frames (`POB_ANSI=1` for colour,
+`POB_PPM_DIR=dir` for raw NTSC frames); `tools/ansi2png.py` turns an ANSI
+dump into PNGs.
+
+**Not done yet:** guards and sword fighting (no guards appear; altset and
+sword tables are already extracted), the shadow, princess/vizier
+cutscenes, slicers and the mirror are only partly ported, sound (events are
+logged only), the upside-down potion effect, CROPCHAR-style cropping (a
+stand-in redraws floor lips over a hanging kid), level-specific scripting
+beyond levels 1, 6 and 13. The timer runs on real minutes at 12 fps.
+
+## Rights: what Mechner's README actually says
+
+Checked 2026-10-03 in the reference zip (README updated September 2024):
+"As the author and copyright holder of this source code, I personally have
+no problem with anyone studying it, modifying it, attempting to run it,
+etc. Please understand that this does NOT constitute a grant of rights of
+any kind in Prince of Persia, which is an ongoing Ubisoft game franchise.
+Ubisoft alone has the right to make and distribute Prince of Persia
+games." The repo's LICENSE file only points to that README.
+
+So the earlier "legally clear" wording below does not match the source's
+own terms for distribution. This build embeds Mechner's original image
+tables and level blueprints (`assets/apple2/`) and data assembled from his
+tables (`src/gen/`). Studying, modifying and running it is what he
+explicitly welcomes; shipping it in the catalog is a separate question for
+David (and a natural topic for the courtesy note to Mechner). The game code
+itself was written from the 6502 source (PrinceJS, public domain, was only
+glanced at); SDLPoP (GPL-3) was not used.
+
+## Open questions
+
+- [ ] Movement system approach — faithful rotoscoped animation reproduction
+      vs new Braille-native animation built with the same design principles
+- [ ] Level data — extract from original source directly, or rebuild levels
+      using the original design language
+- [ ] Texture overlay technical implementation — confirm the Terminal Orbit
+      `texture.rs` approach ports cleanly to a 2.5D side-scrolling context
+- [ ] Trap/hazard rendering — floor traps, spikes, guards need to read clearly
+      at Braille resolution without ambiguity, since PoP's difficulty depends
+      on precise player trust in what they see
+- [ ] Timer mechanic — the original's real-time countdown is a defining
+      feature; confirm it carries over as-is
+- [ ] Scope: original campaign faithful recreation vs new levels using the
+      same engine
+
+## Status
+
+First playable cut (2026-10-03): kid movement, traps, all 14 original
+levels, hybrid Braille/block rendering. See "What exists" and "Rights"
+above. The design text above this section is from the 2026-07-08 ideation
+and is kept as written.

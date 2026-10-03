@@ -1,0 +1,17 @@
+[package]
+name = "prince-of-braille"
+version = "0.1.0"
+edition = "2021"
+description = "Asciiverse restoration of Jordan Mechner's Apple II Prince of Persia (1989), drawn in Braille dots"
+
+[[bin]]
+name = "prince-of-braille"
+path = "src/main.rs"
+
+[dependencies]
+ratatui = "0.29"
+log = "0.4"
+env_logger = "0.11"
+
+[profile.release]
+debug = 1
