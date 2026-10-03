@@ -10,8 +10,8 @@ unpacked copy of it) and writes:
   src/gen/framedef.rs      FRAMEDEF.S frame, altset and sword tables
 
 The two .S files are assembled by a tiny Merlin subset (labels, local
-:labels, equates, db/dfb/dw/hex/ds with +/- expressions), which is all
-those two files use. Everything is copied or assembled byte for byte; no
+:labels, equates, db/dfb/dw/hex/ds with +/- expressions, do/else/fin
+conditional assembly), which is all those two files use. Everything is copied or assembled byte for byte; no
 values are retyped by hand.
 
 Usage: tools/extract.py [path-to-zip-or-dir]
@@ -128,12 +128,26 @@ class Asm:
         pc = self.org
         glob = ""
         dum = None  # pc inside a dum section
+        cond = []  # do/else/fin stack: is each level being assembled?
         for raw in self.lines:
             s = self.split(raw)
             if s is None:
                 continue
             label, op, operand = s
             opl = (op or "").lower()
+            # conditional assembly: `do EXPR` ... [`else`] ... `fin`
+            if opl == "do":
+                cond.append(all(cond) and self.value(operand, glob, pc, False) != 0)
+                continue
+            if opl == "else":
+                outer = all(cond[:-1])
+                cond[-1] = outer and not cond[-1]
+                continue
+            if opl == "fin":
+                cond.pop()
+                continue
+            if not all(cond):
+                continue
             if label and not label.startswith(":"):
                 if opl != "=":
                     glob = label

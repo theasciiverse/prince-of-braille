@@ -538,3 +538,62 @@ mod tests {
         assert_eq!(getblockxp(65), (0, 0));
     }
 }
+
+#[cfg(test)]
+mod exit_tests {
+    use super::*;
+    use crate::level::Level;
+
+    /// Stand the kid on block (bx, by) of `scrn`, facing `face`.
+    fn place(g: &mut Game, scrn: u8, bx: u8, by: u8, face: u8) {
+        g.kid.scrn = scrn;
+        g.vis_scrn = scrn;
+        g.kid.block_x = bx;
+        g.kid.block_y = by;
+        g.kid.face = face;
+        g.kid.x = getblockej(bx as i8).wrapping_add(ANGLE + 7);
+        g.kid.y = FLOOR_Y[by as usize + 1];
+        g.kid.action = 0;
+        g.kid.yvel = 0;
+        g.jumpseq(crate::seq::seq::STAND);
+        g.animchar();
+        g.message = None;
+    }
+
+    /// Open the level 1 exit, stand the kid in its doorway, hold Up.
+    fn climb(bx: u8, face: u8) -> u8 {
+        let mut g = Game::new(1);
+        let i = Level::index(9, 3, 1);
+        g.level.bluespec[i] = crate::mover::EMAXVAL;
+        place(&mut g, 9, bx, 1, face);
+        for _ in 0..4 {
+            g.tick(Controls::default());
+        }
+        for _ in 0..80 {
+            g.tick(Controls { x: 0, y: -1, btn: false });
+            if g.level.number == 2 {
+                break;
+            }
+        }
+        g.level.number
+    }
+
+    #[test]
+    fn up_in_the_open_exit_climbs_to_the_next_level() {
+        // the regression: a `do 0` block in SEQTABLE.S was assembled, so
+        // climbstairs walked back down to `stand` instead of `nextlevel`
+        for (bx, face) in [(3, FACE_LEFT), (3, FACE_RIGHT), (4, FACE_LEFT), (4, FACE_RIGHT)] {
+            assert_eq!(climb(bx, face), 2, "from block {bx}, face {face:#x}");
+        }
+    }
+
+    #[test]
+    fn a_closed_exit_does_not_let_you_climb() {
+        let mut g = Game::new(1);
+        place(&mut g, 9, 3, 1, FACE_LEFT);
+        for _ in 0..60 {
+            g.tick(Controls { x: 0, y: -1, btn: false });
+        }
+        assert_eq!(g.level.number, 1);
+    }
+}
