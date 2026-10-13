@@ -25,7 +25,7 @@ import zipfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
-DEFAULT_REF = "asciiverse/references/Prince of Persia/Prince-of-Persia-Apple-II-master.zip"
+DEFAULT_REF = os.path.join(HERE, "..", "..", "..", "references", "Prince of Persia", "Prince-of-Persia-Apple-II-master.zip")
 PREFIX = "Prince-of-Persia-Apple-II-master/01 POP Source/"
 
 
