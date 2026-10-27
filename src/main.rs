@@ -167,6 +167,9 @@ fn run(terminal: &mut DefaultTerminal, level: u8, exact: bool, theme: theme::The
 /// text after every token. A token starting with `=` just prints.
 fn dump_frames(level: u8, script: &str, theme: theme::Theme) {
     let mut g = Game::new(level);
+    if let Some(at) = std::env::var("POB_AT").ok().and_then(|v| parse_at(&v)) {
+        g.place_kid(at.0, at.1, at.2, at.3);
+    }
     let mut scr = Screen::default();
     let (w, h) = render::cells_needed(1);
     for tok in script.split_whitespace() {
@@ -237,6 +240,14 @@ fn dump_frames(level: u8, script: &str, theme: theme::Theme) {
             println!("{}", line.trim_end());
         }
     }
+}
+
+/// POB_AT="scrn,bx,by[,L|R]": where the kid starts a --dump run.
+fn parse_at(v: &str) -> Option<(u8, u8, u8, u8)> {
+    let p: Vec<&str> = v.split(',').collect();
+    let n = |i: usize| p.get(i)?.trim().parse::<u8>().ok();
+    let face = if p.get(3).is_some_and(|f| f.trim() == "L") { game::FACE_LEFT } else { game::FACE_RIGHT };
+    Some((n(0)?, n(1)?, n(2)?, face))
 }
 
 fn handle(app: &mut App, cmd: Cmd) {

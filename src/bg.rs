@@ -78,6 +78,13 @@ const BLOCKFR: [u8; 2] = [0x83, 0x83];
 const TORCHFLAME: [u8; 18] = [
     0x52, 0x53, 0x54, 0x55, 0x56, 0x61, 0x62, 0x63, 0x64, 0x52, 0x54, 0x56, 0x52, 0x53, 0x54, 0x55, 0x56, 0x61,
 ];
+// Slicer animation frames (BGDATA.S)
+const SLICERSEQ: [u8; 7] = [4, 3, 1, 2, 5, 4, 4];
+const SLICERTOP: [u8; 5] = [0x00, 0x58, 0x5a, 0x5c, 0x5e];
+const SLICERBOT: [u8; 5] = [0x57, 0x59, 0x5b, 0x5d, 0x5f];
+const SLICERBOT2: [u8; 5] = [0x8e, 0x8f, 0x90, 0x5d, 0x5f];
+const SLICERGAP: [u8; 5] = [0, 38, 46, 53, 55];
+const SLICERFRNT: [u8; 5] = [0x65, 0x66, 0x67, 0x68, 0x69];
 const BUBBLE: [u8; 9] = [0xb2, 0xaf, 0xb0, 0xb1, 0xb0, 0xaf, 0xb1, 0xb0, 0xaf];
 
 const fn hexdigit(c: u8) -> u8 {
@@ -298,7 +305,8 @@ pub fn draw(scr: &mut Screen, g: &Game) {
         draw_mob(&mut p, g, m);
     }
 
-    // the shadowman or guard, then the kid (TOPCTRL.S addchars)
+    // the reflection, the shadowman or guard, then the kid (addchars)
+    draw_reflection(p.scr, g);
     draw_shad(p.scr, g);
     draw_kid(p.scr, g);
 
@@ -520,12 +528,25 @@ fn drawma(p: &mut Painter, b: &Blk) {
                 p.scr.lay(&i, (b.xco + 2) * 7 + off, y - 14, false, Op::Sta, potion_ink(kind));
             }
         }
+        obj::SLICER => {
+            // drawslicera: bottom jaw (smeared once bloodied), then the top
+            let x = slicer_frame(b.state);
+            let bot = if b.state & 0x80 != 0 { SLICERBOT2[x] } else { SLICERBOT[x] };
+            p.add(bot, b.xco, b.ay, Op::Or, Ink::Gate);
+            p.add(SLICERTOP[x], b.xco, b.ay - SLICERGAP[x] as i32, Op::Or, Ink::Gate);
+        }
         obj::SWORD => {
             let img = if b.state == 1 { SWORDGLEAM1 } else { SWORDGLEAM0 };
             p.add(img, b.xco, b.ay, Op::Sta, Ink::Sword);
         }
         _ => {}
     }
+}
+
+/// Index into the slicer piece tables for a slicer state.
+fn slicer_frame(state: u8) -> usize {
+    let n = (state & 0x7f).min(crate::mover::SLICER_RET);
+    SLICERSEQ[n as usize] as usize - 1
 }
 
 fn potion_ink(_kind: u8) -> Ink {
@@ -603,6 +624,12 @@ fn drawfrnt(p: &mut Painter, v: &View, g: &Game, b: &Blk) {
         drawgatebf(p, b);
     }
     let id = b.objid;
+    if id == obj::SLICER {
+        // drawslicerf
+        let x = slicer_frame(b.state);
+        p.add(SLICERFRNT[x], b.xco, b.ay, Op::Mask, Ink::Gate);
+        return;
+    }
     let mut img = FRONTI[id as usize % 30];
     if id == obj::FLASK {
         let k = b.state & 0xe0;
@@ -653,7 +680,9 @@ fn draw_kid(scr: &mut Screen, g: &Game) {
         return;
     }
     let (f, frame) = setupchar(&g.kid);
-    lay_char(scr, g, &f, 0, Op::Mask, Ink::Kid);
+    // after the merge on level 12 the kid flashes between kid and shadow
+    let op = if g.mergetimer > 0 && g.mergetimer & 1 != 0 { Op::Eor } else { Op::Mask };
+    lay_char(scr, g, &f, 0, op, Ink::Kid);
     if g.chg_kid_str & 0x80 != 0 {
         draw_comix(scr, g, &g.kid, &f);
     }
@@ -669,7 +698,9 @@ fn draw_shad(scr: &mut Screen, g: &Game) {
     }
     let (f, frame) = setupchar(c);
     if c.id == 1 {
-        lay_char(scr, g, &f, 0, Op::Eor, Ink::Guard);
+        // clipped at the left as he jumps out of the level 4 mirror
+        let left = if g.level.number == 4 && c.scrn == 4 { (4 * 4 + 1) * 7 } else { 0 };
+        lay_char_crop(scr, g, &f, Op::Eor, Ink::Guard, left, 0);
     } else {
         let shift = if c.id == 24 { 0 } else { g.guard_color as i32 & 1 };
         lay_char(scr, g, &f, shift, Op::Mask, Ink::Guard);
@@ -678,6 +709,23 @@ fn draw_shad(scr: &mut Screen, g: &Game) {
         draw_comix(scr, g, c, &f);
     }
     draw_sword(scr, g, c, &f, &frame);
+}
+
+/// The kid's reflection in a mirror, cropped to the mirror.
+fn draw_reflection(scr: &mut Screen, g: &Game) {
+    let Some((c, left)) = g.reflect else { return };
+    let (f, _) = setupchar(&c);
+    let by = c.block_y as i8 as i32;
+    let top = BLOCK_TOP[(by + 1).clamp(0, 4) as usize];
+    if top >= f.y {
+        return;
+    }
+    lay_char_crop(scr, g, &f, Op::Mask, Ink::Kid, left, top as i32);
+}
+
+fn lay_char_crop(scr: &mut Screen, g: &Game, f: &FChar, op: Op, ink: Ink, left: i32, top: i32) {
+    let Some(img) = apple::chtable(f.table, g.level.number).and_then(|t| t.get(f.image)) else { return };
+    scr.lay_crop(&img, f.x, f.y as i32, f.face & 0x80 == 0, op, ink, left, top);
 }
 
 fn lay_char(scr: &mut Screen, g: &Game, f: &FChar, shift: i32, op: Op, ink: Ink) {

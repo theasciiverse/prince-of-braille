@@ -247,8 +247,14 @@ impl Game {
                     let hi = self.getseq();
                     self.ch.seq = seq::addr(lo, hi);
                 }
-                op::UP => self.ch.block_y = self.ch.block_y.wrapping_sub(1),
-                op::DOWN => self.ch.block_y = self.ch.block_y.wrapping_add(1),
+                op::UP => {
+                    self.ch.block_y = self.ch.block_y.wrapping_sub(1);
+                    self.addslicers();
+                }
+                op::DOWN => {
+                    self.ch.block_y = self.ch.block_y.wrapping_add(1);
+                    self.addslicers();
+                }
                 op::ACT => self.ch.action = self.getseq(),
                 op::SETFALL => {
                     self.ch.xvel = self.getseq();

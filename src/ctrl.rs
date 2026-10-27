@@ -785,6 +785,7 @@ impl Game {
             if is_space(id) && self.getdist() < 4 {
                 self.ch.x = self.addcharx((-3i8) as u8);
             }
+            self.addslicers();
             if self.ch.life & 0x80 != 0 {
                 let mut spikes = false;
                 if self.getdist() >= 12 && self.getbehind() == obj::SPIKES {
@@ -886,12 +887,21 @@ impl Game {
         if !is_space(id) {
             return;
         }
+        // Level 12: after the merge, a phantom bridge appears underfoot
+        if self.level.number == 12 && self.mergetimer < 0 && self.ch.block_y == 0 {
+            let s = self.ch.scrn;
+            if s == 2 || (s == 13 && self.rd.bx >= 6) {
+                self.set_type(obj::FLOOR);
+                return;
+            }
+        }
         self.startfall();
     }
 
     fn startfall(&mut self) {
         self.ch.sword = 0;
         self.ch.block_y = self.ch.block_y.wrapping_add(1);
+        self.addslicers();
         let p = self.ch.posn;
         self.rjumpflag = p;
         log::debug!("startfall from posn {p}");

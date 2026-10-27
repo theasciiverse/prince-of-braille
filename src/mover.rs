@@ -33,6 +33,10 @@ pub const BUBB_LAST: u8 = 8;
 const MAXTR: usize = 30;
 const MAXMOB: usize = 14;
 const REQMASK: u8 = 0b0010_0000;
+pub const SLICER_EXT: u8 = 2;
+pub const SLICER_RET: u8 = 6;
+const SLICETIMER: u8 = 15;
+const SLICERSYNC: u8 = 3;
 
 /// SETINITIALS: initial gadget states for a freshly loaded level.
 pub fn set_initials(l: &mut Level) {
@@ -92,6 +96,61 @@ impl Game {
                 _ => {}
             }
         }
+    }
+
+    /// ADDSLICERS (SUBS.S): start every slicer on Char's row, each a few
+    /// frames out of step with the last.
+    pub fn addslicers(&mut self) {
+        let (scrn, by) = (self.ch.scrn, self.ch.block_y);
+        if scrn == 0 || scrn > 24 || by >= 3 {
+            return;
+        }
+        let mut tempstate = SLICETIMER;
+        for bx in 0..10u8 {
+            let i = Level::index(scrn, bx as i32, by as i32);
+            if self.level.bluetype[i] & 0x1f != obj::SLICER {
+                continue;
+            }
+            let v = self.level.bluespec[i];
+            let n = v & 0x7f;
+            if n != 0 && n < SLICER_RET {
+                continue; // in mid-slice: leave it alone
+            }
+            self.trigslicer(i, (v & 0x80) | tempstate);
+            // getnextstate
+            tempstate = tempstate.wrapping_sub(SLICERSYNC);
+            if tempstate < SLICER_RET {
+                tempstate += SLICETIMER + 1 - SLICER_RET;
+            }
+        }
+    }
+
+    /// CRUMBLE (SUBS.S): on level 13, screens 16 and 23 shake loose the
+    /// floor of the screen above as you enter.
+    pub fn crumble(&mut self) {
+        let v = self.vis_scrn;
+        if self.level.number != 13 || (v != 23 && v != 16) {
+            return;
+        }
+        let above = self.level.up(v);
+        for bx in (2..=7).rev() {
+            if self.rdblock(above, bx, 2) == obj::LOOSE {
+                let st = (self.rnd() & 0x0f).wrapping_neg();
+                self.breakloose(st);
+            }
+        }
+    }
+
+    /// TRIGSLICER: set slicer `i` going from `state`.
+    fn trigslicer(&mut self, i: usize, state: u8) {
+        let v = self.level.bluespec[i];
+        if v != 0 && v < SLICER_RET {
+            return; // in mid-slice: don't interfere
+        }
+        self.level.bluespec[i] = state;
+        let loc = (i % 30) as u8;
+        let v = self.vis_scrn;
+        self.addtrob(loc, v, 1);
     }
 
     /// GETSPIKES: 0 safe, 1 sprung, 2 springing (rd = the spikes).
@@ -388,6 +447,7 @@ impl Game {
                 }
             }
             obj::SPACE => d = -1,
+            obj::SLICER => self.animslicer(t, &mut state, &mut d),
             obj::GATE => self.animgate(&mut state, &mut d),
             obj::EXIT => self.animexit(&mut state, &mut d),
             obj::FLASK => {
@@ -417,6 +477,30 @@ impl Game {
         }
         self.level.bluespec[i] = state;
         d
+    }
+
+    /// animslicer: the jaws close at SLICER_EXT; a slicer keeps going
+    /// while the kid is alive on its row of the visible screen (or while
+    /// it is bloodied), otherwise it stops once retracted.
+    fn animslicer(&mut self, t: Trob, state: &mut u8, d: &mut i8) {
+        if *d < 0 {
+            return;
+        }
+        let hib = *state & 0x80;
+        let mut n = (*state & 0x7f) + 1;
+        if n > SLICETIMER {
+            n = 1;
+        }
+        *state = n | hib;
+        if n == SLICER_EXT {
+            self.add_sound(Sound::JawsClash);
+        }
+        let keep = t.scrn == self.vis_scrn
+            && t.loc / 10 == self.kid.block_y
+            && (self.kid.life & 0x80 != 0 || hib != 0);
+        if !keep && n >= SLICER_RET {
+            *d = -1;
+        }
     }
 
     fn flameframe(&mut self, state: u8) -> u8 {

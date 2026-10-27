@@ -724,6 +724,7 @@ impl Game {
                 self.checkpress();
                 self.checkspikes();
                 self.checkimpale();
+                self.checkslice2();
             }
         }
         self.save_shad();
@@ -1325,5 +1326,101 @@ mod tests {
         g.stabchar();
         assert_eq!(g.chg_opp_str, 0);
         assert!(g.ch.life & 0x80 != 0);
+    }
+}
+
+#[cfg(test)]
+mod mirror_tests {
+    use super::*;
+    use crate::level::Level;
+
+    /// Level 4 with the exit open (so the mirror is in place), the kid
+    /// running left along the top of screen 4 towards it.
+    fn mirror_run(run: u32) -> Game {
+        let mut g = Game::new(4);
+        let i = Level::index(4, 4, 0);
+        g.level.set_type(i, obj::MIRROR);
+        g.exitopen = 1;
+        g.place_kid(4, 9, 0, FACE_LEFT);
+        let left = Controls { x: -1, y: 0, btn: false };
+        let jump = Controls { x: -1, y: -1, btn: false };
+        for _ in 0..run {
+            g.tick(left);
+        }
+        for _ in 0..30 {
+            g.tick(jump);
+        }
+        g
+    }
+
+    #[test]
+    fn running_jump_through_the_mirror_frees_the_shadow() {
+        let freed = (4..14).map(mirror_run).find(|g| g.shad.id == 1 && g.shad.face != NO_CHAR || g.level.spec(&g.level.rdblock(4, 4, 0)) == 86);
+        let g = freed.expect("no running jump reached the mirror");
+        // the mirror is smashed, the shadow takes the kid's strength
+        assert_eq!(g.level.spec(&g.level.rdblock(4, 4, 0)), 86);
+        assert_eq!(g.kid_strength, 1);
+        assert_eq!(g.max_opp_str, g.max_strength);
+    }
+
+    #[test]
+    fn standing_before_the_mirror_shows_a_reflection() {
+        let mut g = Game::new(4);
+        let i = Level::index(4, 4, 0);
+        g.level.set_type(i, obj::MIRROR);
+        g.place_kid(4, 4, 0, FACE_LEFT);
+        g.tick(Controls::default());
+        let (r, left) = g.reflect.expect("no reflection");
+        assert_eq!(r.face, FACE_RIGHT);
+        assert_eq!(left, (4 * 4 + 1) * 7);
+    }
+}
+
+#[cfg(test)]
+mod level12_tests {
+    use super::*;
+    use crate::level::Level;
+
+    #[test]
+    fn the_shadow_drops_in_on_level_12_once_the_sword_is_gone() {
+        let mut g = Game::new(12);
+        // the sword still there: no shadow
+        g.place_kid(15, 0, 0, FACE_RIGHT);
+        assert_eq!(g.shad.face, NO_CHAR);
+        let i = Level::index(SWORDSCRN, 1, 0);
+        g.level.set_type(i, obj::FLOOR);
+        // the kid comes in at the right; the shadow waits above
+        g.place_kid(18, 8, 0, FACE_LEFT);
+        g.place_kid(15, 7, 0, FACE_LEFT);
+        assert_eq!(g.shad.id, 1);
+        assert_eq!(g.exitopen, 1);
+        assert_eq!(g.max_opp_str, SHADSTRENGTH);
+        for _ in 0..10 {
+            g.tick(Controls::default());
+        }
+        assert_eq!(g.shadowaction, 0, "held until the kid moves left");
+        let left = Controls { x: -1, y: 0, btn: false };
+        for _ in 0..3 {
+            g.tick(left);
+        }
+        for _ in 0..12 {
+            g.tick(Controls::default());
+        }
+        // he has dropped from above the screen onto the kid's floor
+        assert_eq!(g.shadowaction, 1);
+        assert_eq!((g.shad.scrn, g.shad.block_y, g.shad.y), (15, 0, FLOOR_Y[1]));
+        assert!(g.shad.action != 4, "landed");
+    }
+
+    #[test]
+    fn on_level_12_wounding_the_shadow_wounds_the_kid() {
+        let mut g = Game::new(12);
+        g.ch = Char { id: 1, ..Char::default() };
+        g.op = Char { id: 0, ..Char::default() };
+        g.max_opp_str = 4;
+        g.opp_strength = 4;
+        g.chg_opp_str = 0xff;
+        g.chgmeters();
+        assert_eq!((g.kid_strength, g.opp_strength), (2, 3));
     }
 }

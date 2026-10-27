@@ -241,13 +241,27 @@ impl Screen {
     /// pixels. Mirrored images are laid right to left from `x` + 6, the way
     /// MLAY treats XCO as the image's bottom right byte.
     pub fn lay(&mut self, img: &Image, x: i32, ybot: i32, mirror: bool, op: Op, ink: Ink) {
+        self.lay_crop(img, x, ybot, mirror, op, ink, 0, 0);
+    }
+
+    /// `lay` with nothing drawn left of screen pixel `left` or above line
+    /// `top` (CROPCHAR's FCharCL / FCharCU).
+    #[allow(clippy::too_many_arguments)]
+    pub fn lay_crop(&mut self, img: &Image, x: i32, ybot: i32, mirror: bool, op: Op, ink: Ink, left: i32, top: i32) {
         let wpx = img.width_px();
         for row in 0..img.h {
             let y = ybot - row as i32;
-            if !(0..SCREEN_H).contains(&y) {
+            if !(top.max(0)..SCREEN_H).contains(&y) {
                 continue;
             }
-            let sx = |c: i32| if mirror { x + 6 - c } else { x + c };
+            let sx = |c: i32| {
+                let v = if mirror { x + 6 - c } else { x + c };
+                if v < left {
+                    -1
+                } else {
+                    v
+                }
+            };
             match op {
                 Op::Or => {
                     for c in 0..wpx {

@@ -21,6 +21,7 @@ pub const MINUTES: u32 = 60;
 pub const BLOCK_BOT: [u8; 5] = [2, 65, 128, 191, 254];
 pub const FLOOR_Y: [u8; 5] = [248, 55, 118, 181, 244];
 pub const BLOCK_AY: [u8; 5] = [255, 62, 125, 188, 251];
+pub const BLOCK_TOP: [u8; 5] = [196, 3, 66, 129, 192];
 
 pub const SCRN_LEFT: u8 = 58;
 pub const SCRN_RIGHT: u8 = SCRN_LEFT + 140 - 1;
@@ -126,6 +127,8 @@ pub enum Sound {
     Drink,
     Upstairs,
     SwordClash,
+    JawsClash,
+    MirrorCrack,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -183,6 +186,9 @@ pub struct Game {
     pub lightcolor: u8,
     /// level 3: past the first gate, so a restart starts there
     pub milestone: bool,
+    /// the kid's reflection in a mirror this frame, and the left edge
+    /// (screen pixels) it is cropped to
+    pub reflect: Option<(Char, i32)>,
     pub infrontx: i32,
     pub behindx: i32,
     pub abovey: i32,
@@ -265,6 +271,7 @@ impl Game {
             lightning: 0,
             lightcolor: 0,
             milestone: false,
+            reflect: None,
             infrontx: 0,
             behindx: 0,
             abovey: 0,
@@ -470,6 +477,7 @@ impl Game {
             self.prepcut(scrn);
         }
         self.cutguard();
+        self.reflection();
 
         if self.next_level {
             self.next_level = false;
@@ -513,6 +521,70 @@ impl Game {
         let t = self.frames_left;
         self.start_level(n, true);
         self.frames_left = t;
+    }
+
+    /// Stand the kid on block (bx, by) of `scrn` (for headless runs and
+    /// tests) and show that screen.
+    pub fn place_kid(&mut self, scrn: u8, bx: u8, by: u8, face: u8) {
+        self.load_kid();
+        self.ch.scrn = scrn;
+        self.ch.block_x = bx;
+        self.ch.block_y = by;
+        self.ch.face = face;
+        self.ch.x = getblockej(bx as i8).wrapping_add(ANGLE + 7);
+        self.ch.y = FLOOR_Y[by as usize + 1];
+        self.ch.action = 0;
+        self.ch.yvel = 0;
+        self.jumpseq(s::STAND);
+        self.animchar();
+        self.save_kid();
+        self.shad.face = crate::guard::NO_CHAR;
+        self.message = None;
+        self.prepcut(scrn);
+    }
+
+    /// REFLECTION (MISC.S): the kid's reflection when he stands before a
+    /// mirror; once he has jumped through it, it comes to life as the
+    /// shadowman (CreateShad).
+    fn reflection(&mut self) {
+        self.reflect = None;
+        self.load_kid();
+        self.getframeinfo();
+        if self.createshad {
+            self.getreflect();
+            self.createshad = false;
+            self.ch.id = 1;
+            self.add_sound(Sound::MirrorCrack);
+            self.save_shad();
+            self.max_opp_str = self.max_strength;
+            self.opp_strength = self.max_strength;
+            self.kid_strength = 1;
+            log::info!("the reflection comes to life");
+            return;
+        }
+        if self.getunderft() != crate::level::obj::MIRROR {
+            return;
+        }
+        let bx = self.ch.block_x;
+        if self.getreflect() & 0x80 != 0 {
+            return; // kid is on the wrong side of the mirror
+        }
+        let left = (bx as i32 * 4 + 1) * 7;
+        self.reflect = Some((self.ch, left));
+    }
+
+    /// getreflect: Char becomes the kid's reflection; returns its
+    /// distance from the mirror.
+    fn getreflect(&mut self) -> u8 {
+        let mirrx = getblockej(self.ch.block_x as i8).wrapping_add(ANGLE + 3);
+        let mut d = self.getdist();
+        if !self.face_left() {
+            d = (d ^ 0xff).wrapping_add(14);
+        }
+        let dmirr = d.wrapping_sub(2);
+        self.ch.x = mirrx.wrapping_mul(2).wrapping_sub(self.ch.x);
+        self.ch.face ^= 0xff;
+        dmirr
     }
 
     /// misctimers (TOPCTRL.S)
@@ -564,6 +636,7 @@ impl Game {
             self.checkpress();
             self.checkspikes();
             self.checkimpale();
+            self.checkslice();
             self.shakeloose();
         }
         self.save_kid();
@@ -621,7 +694,9 @@ impl Game {
             return;
         }
         self.load_kid();
+        self.addslicers();
         self.trigger_screen_objects();
+        self.crumble();
         self.addguard();
     }
 
@@ -793,20 +868,7 @@ mod exit_tests {
 
     /// Stand the kid on block (bx, by) of `scrn`, facing `face`.
     fn place(g: &mut Game, scrn: u8, bx: u8, by: u8, face: u8) {
-        g.load_kid();
-        g.ch.scrn = scrn;
-        g.vis_scrn = scrn;
-        g.ch.block_x = bx;
-        g.ch.block_y = by;
-        g.ch.face = face;
-        g.ch.x = getblockej(bx as i8).wrapping_add(ANGLE + 7);
-        g.ch.y = FLOOR_Y[by as usize + 1];
-        g.ch.action = 0;
-        g.ch.yvel = 0;
-        g.jumpseq(crate::seq::seq::STAND);
-        g.animchar();
-        g.save_kid();
-        g.message = None;
+        g.place_kid(scrn, bx, by, face);
     }
 
     /// Open the level 1 exit, stand the kid in its doorway, hold Up.

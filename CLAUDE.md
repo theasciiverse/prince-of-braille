@@ -112,8 +112,8 @@ original 6502 routines, run on the original data:
 | `src/seq.rs` | | sequence + frame tables |
 | `src/subs.rs` | CTRLSUBS.S, SUBS.S | ANIMCHAR, GETBASEX/GETDIST, SETUPCHAR, GETEDGES, CHECKLEDGE, gravity |
 | `src/ctrl.rs` | CTRL.S | all kid control: run, stop, turn, step, stand/run jump, jump up, hang, climb up/down, crouch, crawl, falling, grabbing, landing, impaling, pickups; FightCtrl (strike, block, advance, retreat, sheathe) and GuardCtrl for every character en garde |
-| `src/coll.rs` | COLL.S | frame-to-frame barrier collision, bumps, GETFWDDIST |
-| `src/mover.rs` | MOVER.S | gates, pressure plates and links, loose floors and falling floor MOBs, spikes, exit door, torches, bubbling flasks |
+| `src/coll.rs` | COLL.S | frame-to-frame barrier collision, bumps, GETFWDDIST, CHECKGATE, CHECKSLICE/CHECKSLICE2, smashing the mirror |
+| `src/mover.rs` | MOVER.S, SUBS.S | gates, pressure plates and links, loose floors and falling floor MOBs, spikes, slicers (ADDSLICERS, animslicer), exit door, the level 4 mirror appearing, the level 13 crumbling floors, torches, bubbling flasks |
 | `src/bg.rs` | FRAMEADV.S, BGDATA.S | screen drawing with the A/B/C/D/front piece system |
 | `src/game.rs` | TOPCTRL.S, AUTO.S | frame loop (NextFrame order: DoKid, DoShad, CHECKSTRIKE, ...), the Char/Kid/Shad/Op buffers, screen cuts, timer, death, level progression |
 | `src/guard.rs` | AUTO.S, MISC.S, TOPCTRL.S | guards placed from the level's INFO tables, guard AI (GuardProg, EnGarde, GenFight, the per-program strike/block/advance probabilities), sword contact (CHECKSTRIKE/CHECKSTAB/STABCHAR), strength meters (DECSTR, chgmeters), guards left behind or following you between screens, the skeleton, the shadowman's scripted appearances, the mouse |
@@ -156,8 +156,8 @@ level, `p` pause, `c` colour theme, `g` glyph mode, `f` scale, Esc Esc quit.
 **Debugging:** `RUST_LOG=debug prince-of-braille 2>pob.log` logs every key,
 state changes and a 500 ms state snapshot. `--dump "R:12 .:6 U:1"` runs
 headless with scripted input and prints frames (`POB_ANSI=1` for colour,
-`POB_PPM_DIR=dir` for raw NTSC frames); `tools/ansi2png.py` turns an ANSI
-dump into PNGs.
+`POB_PPM_DIR=dir` for raw NTSC frames, `POB_AT=scrn,bx,by[,L|R]` to start
+the kid somewhere else); `tools/ansi2png.py` turns an ANSI dump into PNGs.
 
 **Guards and sword fighting** (2026-10-28): ported from AUTO.S, CTRL.S
 and MISC.S. As in the original every character routine works on one
@@ -188,13 +188,25 @@ blocks, stabs, deaths); the 500 ms debug snapshot includes the opponent.
   original probably lands him there. Not yet found where the port's fall
   differs by those few pixels: play-test this.
 
-**Not done yet:** the shadow (level 4 mirror emergence, level 6 jump,
-level 12 merge are coded in guard.rs but the mirror and its reflection
-are not), princess/vizier cutscenes, slicers and the mirror are only
-partly ported, sound (events are logged only), the upside-down potion
-effect, screen flashes (lightning is tracked but not drawn),
-CROPCHAR-style cropping (a stand-in redraws floor lips over a hanging
-kid). The timer runs on real minutes at 12 fps.
+**The shadow, the mirror and slicers** (2026-10-28): the kid's
+reflection shows in the level 4 mirror (cropped to it, MISC.S
+REFLECTION); a running jump through it smashes the mirror and the
+reflection comes to life as the shadowman, who takes all but one of the
+kid's strength and runs off. Level 5: the shadow steals the potion once
+the gate opens (the original's prerecorded moves). Level 6: he steps on
+the plate as you jump the chasm. Level 12: he drops in once the sword is
+gone, fights you with what hurts one hurting the other, and merges with
+you when you face him with swords down (the kid flashes between the two,
+and the phantom bridge appears underfoot on screens 2 and 13). Slicers
+run, are drawn and slice, smeared once bloodied. The shadowman is drawn
+EORed, as on the Apple.
+
+**Not done yet:** princess and vizier cutscenes, sound (events are
+logged only), the upside-down potion effect, screen flashes (lightning
+is tracked but not drawn), CROPCHAR-style cropping of characters (a
+stand-in redraws floor lips over a hanging kid; the reflection and the
+level 4 shadow are cropped). Music cues (danger, victory, death, Jaffar's
+theme) are not played. The timer runs on real minutes at 12 fps.
 
 ## Rights: what Mechner's README actually says
 
@@ -241,3 +253,6 @@ and is kept as written.
 2026-10-28: guards and sword fighting, the skeleton, guards following
 you between screens, the level 3 checkpoint and the level 7 drop-in
 start; the kid has his sword from level 2 on, as in the original.
+Then the shadow (level 4 mirror, levels 5 and 6, the level 12 fight and
+merge), the mirror and reflection, slicers, the level 13 crumbling
+floors and the level 12 phantom bridge.

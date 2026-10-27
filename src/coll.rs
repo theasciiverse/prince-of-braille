@@ -7,6 +7,7 @@
 use crate::game::*;
 use crate::level::{is_space, obj};
 use crate::seq::seq as s;
+use crate::mover::SLICER_EXT;
 use crate::subs::{cmpbarr, BAR_L, BAR_R};
 
 const GATEMARGIN: u8 = 6;
@@ -25,7 +26,7 @@ impl Game {
         (self.spec() >> 2).wrapping_add(GATEMARGIN) >= self.edges.imheight
     }
 
-    fn getleftbar(&mut self, scrn: u8, bx: i32, by: i32) -> u8 {
+    pub fn getleftbar(&mut self, scrn: u8, bx: i32, by: i32) -> u8 {
         let id = self.rdblock(scrn, bx, by);
         match cmpbarr(id) {
             0 => 255,
@@ -33,7 +34,7 @@ impl Game {
         }
     }
 
-    fn getrightbar(&mut self, scrn: u8, bx: i32, by: i32) -> u8 {
+    pub fn getrightbar(&mut self, scrn: u8, bx: i32, by: i32) -> u8 {
         let id = self.rdblock(scrn, bx, by);
         match cmpbarr(id) {
             0 => 0,
@@ -183,7 +184,9 @@ impl Game {
             obj::MIRROR => {
                 // passing through from the right takes a running jump
                 if self.ch.id == 0 && (39..44).contains(&self.ch.posn) && self.face_left() {
+                    // SMASHMIRROR; the reflection comes to life
                     self.set_spec(86);
+                    self.createshad = true;
                     return false;
                 }
             }
@@ -292,6 +295,67 @@ impl Game {
         }
         self.alertguard = true;
         self.add_sound(Sound::SmackWall);
+    }
+
+    /// CHECKSLICE: does this frame's CD buffer show the kid overlapping a
+    /// closed slicer?
+    pub fn checkslice(&mut self) {
+        let by = self.ch.block_y as i8 as i32;
+        for x in (0..10).rev() {
+            if self.cd_this[x] != 0xff || self.sn_this[x] == 0xff {
+                continue;
+            }
+            let sn = self.sn_this[x];
+            if self.rdblock(sn, x as i32, by) == obj::SLICER && self.spec() & 0x7f == SLICER_EXT {
+                return self.slice(x as i8);
+            }
+        }
+    }
+
+    /// CHECKSLICE2: the same for an enemy, who has no CD data.
+    pub fn checkslice2(&mut self) {
+        self.getunderft();
+        if self.slice_here() {
+            return;
+        }
+        self.rd.bx += 1;
+        self.rdblock1();
+        self.slice_here();
+    }
+
+    fn slice_here(&mut self) -> bool {
+        if self.rd.id != obj::SLICER || self.spec() & 0x7f != SLICER_EXT {
+            return false;
+        }
+        let (sc, bx, by) = (self.rd.scrn, self.rd.bx, self.rd.by);
+        self.blockedge = getblockej(bx as i8).wrapping_add(ANGLE);
+        if self.getleftbar(sc, bx, by) >= self.edges.cd_right {
+            return false;
+        }
+        if self.getrightbar(sc, bx, by) <= self.edges.cd_left {
+            return false;
+        }
+        self.rdblock(sc, bx, by);
+        self.slice(bx as i8);
+        true
+    }
+
+    /// Slice! (rd = the slicer, `bx` its block)
+    fn slice(&mut self, bx: i8) {
+        let v = self.spec() | 0x80;
+        self.set_spec(v); // bloodied
+        if self.ch.posn == 178 {
+            return; // already cut in half
+        }
+        self.ch.x = getblockej(bx).wrapping_add(7);
+        self.ch.x = self.addcharx(8);
+        let by = self.ch.block_y as i8 as i32;
+        self.ch.y = FLOOR_Y[(by + 1).clamp(0, 4) as usize];
+        self.decstr(100);
+        self.add_sound(Sound::Splat);
+        self.jumpseq(s::HALVE);
+        self.animchar();
+        log::info!("char {} sliced", self.ch.id);
     }
 
     /// CHECKGATE: a closing gate knocks a character standing under it
