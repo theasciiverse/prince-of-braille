@@ -201,12 +201,25 @@ and the phantom bridge appears underfoot on screens 2 and 13). Slicers
 run, are drawn and slice, smeared once bloodied. The shadowman is drawn
 EORed, as on the Apple.
 
-**Not done yet:** princess and vizier cutscenes, sound (events are
-logged only), the upside-down potion effect, screen flashes (lightning
-is tracked but not drawn), CROPCHAR-style cropping of characters (a
+**Upside-down potion and flashes** (2026-10-28): the upside-down potion
+flips the whole picture (HIRES.S INVERTY swaps every line with its
+mirror line) until you die or leave the level; controls stay as they
+are, as in the original. Screen flashes (lightning: the sword, potions,
+the vizier's death, the level 12 merge; red when the kid is hurt) were a
+solid lo-res colour for part of each frame on the Apple; here the black
+of the picture takes a dimmed copy of that colour for the frame instead
+of a full-screen strobe.
+
+**Not done yet:** princess and vizier cutscenes. The scripts (SUBS.S
+PlayCut0-8), their sequences (pstand, vapproach, ...), altset 2 and the
+princess and vizier images (IMG.CHTAB6.A/B, IMG.CHTAB7) are all in the
+released source, but the princess's room itself is a packed full-screen
+picture (MASTER.S `pacProom`, loaded by LoadStage2) that is not in the
+release, so the scenes cannot be drawn as the original drew them. Also
+not done: sound (events are logged only), music cues (danger, victory,
+death, Jaffar's theme), CROPCHAR-style cropping of characters (a
 stand-in redraws floor lips over a hanging kid; the reflection and the
-level 4 shadow are cropped). Music cues (danger, victory, death, Jaffar's
-theme) are not played. The timer runs on real minutes at 12 fps.
+level 4 shadow are cropped). The timer runs on real minutes at 12 fps.
 
 ## Rights: what Mechner's README actually says
 
@@ -255,4 +268,5 @@ you between screens, the level 3 checkpoint and the level 7 drop-in
 start; the kid has his sword from level 2 on, as in the original.
 Then the shadow (level 4 mirror, levels 5 and 6, the level 12 fight and
 merge), the mirror and reflection, slicers, the level 13 crumbling
-floors and the level 12 phantom bridge.
+floors and the level 12 phantom bridge. Then the upside-down potion
+and screen flashes.

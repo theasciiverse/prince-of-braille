@@ -297,6 +297,22 @@ fn cell(kid: u8, dots: &[[u8; 3]; 8], glyphs: Glyphs) -> (char, Style) {
 }
 
 /// Bottom line: strength, level, time, and transient messages.
+/// A screen flash: the original showed a solid lo-res colour for part of
+/// the frame; here the black of the picture takes a dimmed copy of it.
+pub fn paint_flash(buf: &mut Buffer, area: Rect, color: u8) {
+    let c = crate::apple::NTSC[color as usize & 0x0f];
+    let dim = Color::Rgb(c[0] / 2, c[1] / 2, c[2] / 2);
+    for y in area.y..area.y + area.height {
+        for x in area.x..area.x + area.width {
+            if let Some(cell) = buf.cell_mut((x, y)) {
+                if matches!(cell.bg, Color::Black | Color::Reset | Color::Rgb(0, 0, 0)) {
+                    cell.set_bg(dim);
+                }
+            }
+        }
+    }
+}
+
 pub fn paint_status(buf: &mut Buffer, area: Rect, g: &Game, note: &str) {
     let y = area.y;
     let red = Style::default().fg(Color::Rgb(230, 60, 50)).bg(Color::Black);

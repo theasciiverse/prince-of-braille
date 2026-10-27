@@ -421,6 +421,18 @@ impl Game {
         self.save_kid();
     }
 
+    /// flashon (TOPCTRL.S): this frame's flash colour, as a lo-res colour
+    /// number (lightning, or red when the kid has just been hurt).
+    pub fn flash(&self) -> Option<u8> {
+        if self.lightning > 0 {
+            Some(self.lightcolor & 0x0f)
+        } else if self.chg_kid_str & 0x80 != 0 {
+            Some(1) // $11: red
+        } else {
+            None
+        }
+    }
+
     pub fn show_message(&mut self, s: String, frames: u32) {
         self.message = Some((s, frames));
     }
@@ -896,6 +908,31 @@ mod exit_tests {
         for (bx, face) in [(3, FACE_LEFT), (3, FACE_RIGHT), (4, FACE_LEFT), (4, FACE_RIGHT)] {
             assert_eq!(climb(bx, face), 2, "from block {bx}, face {face:#x}");
         }
+    }
+
+    #[test]
+    fn the_upside_down_potion_flips_the_picture_until_you_die() {
+        let mut g = Game::new(2);
+        place(&mut g, 5, 3, 1, FACE_LEFT);
+        let mut normal = crate::apple::Screen::default();
+        crate::bg::draw(&mut normal, &g);
+        g.load_kid();
+        g.potion = 4;
+        g.jumpseq(crate::seq::seq::DRINKPOTION);
+        for _ in 0..40 {
+            g.animchar();
+        }
+        g.save_kid();
+        assert!(g.inverted);
+        place(&mut g, 5, 3, 1, FACE_LEFT);
+        let mut flipped = crate::apple::Screen::default();
+        crate::bg::draw(&mut flipped, &g);
+        let w = crate::apple::SCREEN_W as usize;
+        let row = |s: &crate::apple::Screen, y: usize| s.px[y * w..(y + 1) * w].to_vec();
+        assert_eq!(row(&normal, 10), row(&flipped, 181));
+        g.kid.life = 0;
+        g.tick(Controls::default());
+        assert!(!g.inverted);
     }
 
     #[test]

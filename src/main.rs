@@ -330,6 +330,9 @@ fn draw(f: &mut ratatui::Frame, app: &mut App, input: &Input) {
     let ox = area.x + (area.width - w) / 2;
     let oy = area.y + (area.height - h - 1) / 2;
     render::paint_screen(buf, Rect::new(ox, oy, w, h), &app.screen, scale, app.glyphs, app.theme, app.game.level.palace());
+    if let Some(c) = app.game.flash() {
+        render::paint_flash(buf, Rect::new(ox, oy, w, h), c);
+    }
     let mut note = format!("{} {} {}x", app.theme.name(), app.glyphs.name(), scale);
     if input.mode == input::Mode::Timing {
         note.push_str(" keys:timing");

@@ -174,6 +174,18 @@ impl Default for Screen {
 }
 
 impl Screen {
+    /// Swap line y with line 191 - y.
+    pub fn flip_vertical(&mut self) {
+        let w = SCREEN_W as usize;
+        for y in 0..SCREEN_H as usize / 2 {
+            let z = SCREEN_H as usize - 1 - y;
+            for x in 0..w {
+                self.px.swap(y * w + x, z * w + x);
+                self.pal.swap(y * w + x, z * w + x);
+            }
+        }
+    }
+
     pub fn clear(&mut self) {
         self.px.fill(Ink::None);
         self.pal.fill(false);

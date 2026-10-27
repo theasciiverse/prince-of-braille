@@ -317,6 +317,11 @@ pub fn draw(scr: &mut Screen, g: &Game) {
     for b in &fronts {
         drawfrnt(&mut p, &v, g, b);
     }
+
+    // the upside-down potion (HIRES.S INVERTY swaps the line addresses)
+    if g.inverted {
+        p.scr.flip_vertical();
+    }
 }
 
 /// For the screen-above row, BELOW is this screen's top row (one to the left).
