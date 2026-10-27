@@ -2,6 +2,7 @@
 name = "prince-of-braille"
 version = "0.1.0"
 edition = "2021"
+license = "MIT"
 description = "Asciiverse restoration of Jordan Mechner's Apple II Prince of Persia (1989), drawn in Braille dots"
 
 [[bin]]
@@ -12,6 +13,7 @@ path = "src/main.rs"
 ratatui = "0.29"
 log = "0.4"
 env_logger = "0.11"
+rodio = { version = "0.22", default-features = false, features = ["playback"] }
 
 [profile.release]
 debug = 1

@@ -128,6 +128,7 @@ pub enum Sound {
     Upstairs,
     SwordClash,
     JawsClash,
+    RaisingExit,
     MirrorCrack,
 }
 

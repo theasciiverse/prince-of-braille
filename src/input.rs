@@ -76,6 +76,7 @@ pub enum Cmd {
     Scale,
     Pause,
     Theme,
+    Mute,
 }
 
 pub struct Input {
@@ -178,6 +179,7 @@ impl Input {
             KeyCode::Char('f') if fresh => self.cmds.push(Cmd::Scale),
             KeyCode::Char('p') if fresh => self.cmds.push(Cmd::Pause),
             KeyCode::Char('c') if fresh => self.cmds.push(Cmd::Theme),
+            KeyCode::Char('m') | KeyCode::F(8) if fresh => self.cmds.push(Cmd::Mute),
             _ => {}
         }
         // timing mode: Shift on an arrow key means the button is down too

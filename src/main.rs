@@ -20,6 +20,7 @@ mod level;
 mod mover;
 mod render;
 mod seq;
+mod sound;
 mod subs;
 mod theme;
 
@@ -46,10 +47,11 @@ struct App {
     paused: bool,
     confirm_quit: bool,
     quit: bool,
+    audio: sound::Audio,
 }
 
 fn usage() -> ! {
-    eprintln!("usage: prince-of-braille [--theme dusk|phosphor|amber|classic] [LEVEL]   (level 1-14, default 1)");
+    eprintln!("usage: prince-of-braille [--theme dusk|phosphor|amber|classic] [--mute] [LEVEL]   (level 1-14, default 1)");
     std::process::exit(2);
 }
 
@@ -58,11 +60,13 @@ fn main() -> io::Result<()> {
     let mut level = 1u8;
     let mut dump: Option<String> = None;
     let mut theme = theme::load().unwrap_or(theme::Theme::Dusk);
+    let mut mute = false;
     let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {
         match a.as_str() {
             "-h" | "--help" => usage(),
             "--dump" => dump = Some(args.next().unwrap_or_default()),
+            "--mute" => mute = true,
             "--theme" => {
                 theme = args.next().as_deref().and_then(theme::Theme::from_name).unwrap_or_else(|| usage());
             }
@@ -82,7 +86,7 @@ fn main() -> io::Result<()> {
         execute!(io::stdout(), PushKeyboardEnhancementFlags(flags))?;
     }
     log::info!("start level={level} exact_keys={exact}");
-    let result = run(&mut terminal, level, exact, theme);
+    let result = run(&mut terminal, level, exact, theme, mute);
     if exact {
         let _ = execute!(io::stdout(), PopKeyboardEnhancementFlags);
     }
@@ -90,7 +94,7 @@ fn main() -> io::Result<()> {
     result
 }
 
-fn run(terminal: &mut DefaultTerminal, level: u8, exact: bool, theme: theme::Theme) -> io::Result<()> {
+fn run(terminal: &mut DefaultTerminal, level: u8, exact: bool, theme: theme::Theme, mute: bool) -> io::Result<()> {
     let mut app = App {
         game: Game::new(level),
         screen: Screen::default(),
@@ -100,6 +104,7 @@ fn run(terminal: &mut DefaultTerminal, level: u8, exact: bool, theme: theme::The
         paused: false,
         confirm_quit: false,
         quit: false,
+        audio: sound::Audio::new(mute),
     };
     let mut input = Input::new(exact);
     let tick = Duration::from_secs(1) / FPS;
@@ -122,6 +127,7 @@ fn run(terminal: &mut DefaultTerminal, level: u8, exact: bool, theme: theme::The
             if !app.paused && !app.confirm_quit {
                 let c = input.controls(now);
                 app.game.tick(c);
+                app.audio.play(&app.game.sounds);
             }
             next += tick;
             steps += 1;
@@ -296,6 +302,10 @@ fn handle(app: &mut App, cmd: Cmd) {
             }
         }
         Cmd::Pause => app.paused = !app.paused,
+        Cmd::Mute => {
+            app.audio.muted = !app.audio.muted;
+            log::info!("sound muted {}", app.audio.muted);
+        }
     }
 }
 
@@ -336,6 +346,9 @@ fn draw(f: &mut ratatui::Frame, app: &mut App, input: &Input) {
     let mut note = format!("{} {} {}x", app.theme.name(), app.glyphs.name(), scale);
     if input.mode == input::Mode::Timing {
         note.push_str(" keys:timing");
+    }
+    if app.audio.muted {
+        note.push_str(" mute");
     }
     if app.paused {
         note.push_str(" PAUSED");

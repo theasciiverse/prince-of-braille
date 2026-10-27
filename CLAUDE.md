@@ -118,6 +118,7 @@ original 6502 routines, run on the original data:
 | `src/game.rs` | TOPCTRL.S, AUTO.S | frame loop (NextFrame order: DoKid, DoShad, CHECKSTRIKE, ...), the Char/Kid/Shad/Op buffers, screen cuts, timer, death, level progression |
 | `src/guard.rs` | AUTO.S, MISC.S, TOPCTRL.S | guards placed from the level's INFO tables, guard AI (GuardProg, EnGarde, GenFight, the per-program strike/block/advance probabilities), sword contact (CHECKSTRIKE/CHECKSTAB/STABCHAR), strength meters (DECSTR, chgmeters), guards left behind or following you between screens, the skeleton, the shadowman's scripted appearances, the mouse |
 | `src/render.rs` | | terminal output (below) |
+| `src/sound.rs` | SOUND.S | the speaker effects, synthesised from `tone`'s loop timings, played with rodio |
 | `src/input.rs` | SPECIALK.S | keys to joystick + clr flags |
 
 Variable and routine names follow the source, and byte arithmetic wraps the
@@ -151,7 +152,8 @@ the choice is saved to `~/.config/prince-of-braille/theme`;
 Shift or Space = button (grab, careful step, pick up/drink). With the kitty
 keyboard protocol keys are exact (real releases, chords); elsewhere held
 keys are inferred from OS key repeat. `r` restart level, `n`/`b` next/prev
-level, `p` pause, `c` colour theme, `g` glyph mode, `f` scale, Esc Esc quit.
+level, `p` pause, `c` colour theme, `g` glyph mode, `f` scale, `m` or F8
+sound on/off (`--mute` starts without sound), Esc Esc quit.
 
 **Debugging:** `RUST_LOG=debug prince-of-braille 2>pob.log` logs every key,
 state changes and a 500 ms state snapshot. `--dump "R:12 .:6 U:1"` runs
@@ -210,14 +212,23 @@ solid lo-res colour for part of each frame on the Apple; here the black
 of the picture takes a dimmed copy of that colour for the frame instead
 of a full-screen strobe.
 
+**Sound** (2026-10-28): SOUND.S's effects (footsteps, plates, gates,
+the exit, splats, sword clashes, slicer jaws, ...) rebuilt as the Apple
+speaker made them: `tone` flips the one-bit speaker `duration` times
+with a delay loop between flips, so each effect is a square wave whose
+half-period is that loop's cycle count at 1.023 MHz. Rendered once at
+start-up and played with rodio, as in the other Asciiverse games. The
+drink and upstairs events were music cues in the original and stay
+silent.
+
 **Not done yet:** princess and vizier cutscenes. The scripts (SUBS.S
 PlayCut0-8), their sequences (pstand, vapproach, ...), altset 2 and the
 princess and vizier images (IMG.CHTAB6.A/B, IMG.CHTAB7) are all in the
 released source, but the princess's room itself is a packed full-screen
 picture (MASTER.S `pacProom`, loaded by LoadStage2) that is not in the
 release, so the scenes cannot be drawn as the original drew them. Also
-not done: sound (events are logged only), music cues (danger, victory,
-death, Jaffar's theme), CROPCHAR-style cropping of characters (a
+not done: music (the song cues: danger, victory, death, Jaffar's
+theme, ...), CROPCHAR-style cropping of characters (a
 stand-in redraws floor lips over a hanging kid; the reflection and the
 level 4 shadow are cropped). The timer runs on real minutes at 12 fps.
 
@@ -269,4 +280,4 @@ start; the kid has his sword from level 2 on, as in the original.
 Then the shadow (level 4 mirror, levels 5 and 6, the level 12 fight and
 merge), the mirror and reflection, slicers, the level 13 crumbling
 floors and the level 12 phantom bridge. Then the upside-down potion
-and screen flashes.
+and screen flashes, and the sound effects.

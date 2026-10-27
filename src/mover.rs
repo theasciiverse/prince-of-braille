@@ -578,6 +578,7 @@ impl Game {
             }
             return;
         }
+        self.add_sound(Sound::RaisingExit);
         *state = state.wrapping_add(EXITINC);
         if *state >= EMAXVAL {
             *d = -1;
