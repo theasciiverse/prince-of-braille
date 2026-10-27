@@ -76,7 +76,18 @@ pub struct Level {
     pub linkloc: [u8; 256],
     pub linkmap: [u8; 256],
     map: [u8; 96],
-    info: [u8; 256],
+    pub info: [u8; 256],
+}
+
+/// Offsets of the per-screen guard tables in INFO (EQ.S), each 24 bytes
+/// indexed by screen - 1.
+pub mod gd {
+    pub const BLOCK: usize = 71;
+    pub const FACE: usize = 95;
+    pub const X: usize = 119;
+    pub const SEQL: usize = 143;
+    pub const PROG: usize = 167;
+    pub const SEQH: usize = 191;
 }
 
 /// What RDBLOCK hands back: the object plus where it really lives once
@@ -118,6 +129,20 @@ impl Level {
 
     pub fn kid_start(&self) -> (u8, u8, u8) {
         (self.info[64], self.info[65], self.info[66])
+    }
+
+    /// GdStart table `t` (a `gd::` offset) for screen `scrn` (1-24).
+    pub fn gd(&self, t: usize, scrn: u8) -> u8 {
+        if scrn == 0 || scrn > 24 {
+            return 0xff;
+        }
+        self.info[t + scrn as usize - 1]
+    }
+
+    pub fn set_gd(&mut self, t: usize, scrn: u8, v: u8) {
+        if (1..=24).contains(&scrn) {
+            self.info[t + scrn as usize - 1] = v;
+        }
     }
 
     fn link(&self, scrn: u8, dir: usize) -> u8 {

@@ -24,15 +24,15 @@ pub const BAR_R: [u8; 5] = [0, 0, 9, 11, 0];
 
 impl Game {
     pub fn face_left(&self) -> bool {
-        self.kid.face & 0x80 != 0
+        self.ch.face & 0x80 != 0
     }
 
     /// ADDCHARX: CharX + A in the direction the char faces.
     pub fn addcharx(&self, a: u8) -> u8 {
         if self.face_left() {
-            self.kid.x.wrapping_sub(a)
+            self.ch.x.wrapping_sub(a)
         } else {
-            self.kid.x.wrapping_add(a)
+            self.ch.x.wrapping_add(a)
         }
     }
 
@@ -74,10 +74,10 @@ impl Game {
     }
 
     fn bx(&self) -> i32 {
-        self.kid.block_x as i8 as i32
+        self.ch.block_x as i8 as i32
     }
     fn by(&self) -> i32 {
-        self.kid.block_y as i8 as i32
+        self.ch.block_y as i8 as i32
     }
     fn fwd(&self) -> i32 {
         if self.face_left() {
@@ -88,39 +88,38 @@ impl Game {
     }
 
     pub fn getunderft(&mut self) -> u8 {
-        let (s, x, y) = (self.kid.scrn, self.bx(), self.by());
+        let (s, x, y) = (self.ch.scrn, self.bx(), self.by());
         self.rdblock(s, x, y)
     }
     pub fn getinfront(&mut self) -> u8 {
         self.infrontx = self.bx() + self.fwd();
-        let (s, x, y) = (self.kid.scrn, self.infrontx, self.by());
+        let (s, x, y) = (self.ch.scrn, self.infrontx, self.by());
         self.rdblock(s, x, y)
     }
-    #[allow(dead_code)]
     pub fn get2infront(&mut self) -> u8 {
-        let (s, x, y) = (self.kid.scrn, self.bx() + 2 * self.fwd(), self.by());
+        let (s, x, y) = (self.ch.scrn, self.bx() + 2 * self.fwd(), self.by());
         self.rdblock(s, x, y)
     }
     pub fn getbehind(&mut self) -> u8 {
         self.behindx = self.bx() - self.fwd();
-        let (s, x, y) = (self.kid.scrn, self.behindx, self.by());
+        let (s, x, y) = (self.ch.scrn, self.behindx, self.by());
         self.rdblock(s, x, y)
     }
     pub fn getabove(&mut self) -> u8 {
         self.abovey = self.by() - 1;
-        let (s, x, y) = (self.kid.scrn, self.bx(), self.abovey);
+        let (s, x, y) = (self.ch.scrn, self.bx(), self.abovey);
         self.rdblock(s, x, y)
     }
     pub fn getaboveinf(&mut self) -> u8 {
         self.infrontx = self.bx() + self.fwd();
         self.abovey = self.by() - 1;
-        let (s, x, y) = (self.kid.scrn, self.infrontx, self.abovey);
+        let (s, x, y) = (self.ch.scrn, self.infrontx, self.abovey);
         self.rdblock(s, x, y)
     }
     pub fn getabovebeh(&mut self) -> u8 {
         self.behindx = self.bx() - self.fwd();
         self.abovey = self.by() - 1;
-        let (s, x, y) = (self.kid.scrn, self.behindx, self.abovey);
+        let (s, x, y) = (self.ch.scrn, self.behindx, self.abovey);
         self.rdblock(s, x, y)
     }
 
@@ -146,12 +145,12 @@ impl Game {
 
     /// GETFRAMEINFO
     pub fn getframeinfo(&mut self) {
-        self.frame = seq::kid_frame(self.kid.posn);
+        self.frame = seq::frame(self.ch.id, self.ch.posn);
     }
 
     /// GETBASEBLOCK
     pub fn getbaseblock(&mut self) {
-        self.kid.block_x = getblockxp(self.getbasex()).0 as u8;
+        self.ch.block_x = getblockxp(self.getbasex()).0 as u8;
     }
 
     /// REREADBLOCKS
@@ -170,13 +169,13 @@ impl Game {
             x -= 512;
         }
         // odd x-coord when the Fcheck hibit matches the facing
-        if (self.frame.check ^ self.kid.face) & 0x80 == 0 {
+        if (self.frame.check ^ self.ch.face) & 0x80 == 0 {
             x += 1;
         }
         self.fchar = FChar {
             x,
-            y: self.frame.dy.wrapping_add(self.kid.y),
-            face: self.kid.face,
+            y: self.frame.dy.wrapping_add(self.ch.y),
+            face: self.ch.face,
             image,
             table,
         };
@@ -184,7 +183,7 @@ impl Game {
 
     /// GETEDGES: image bounds in 140-res, plus the collision edges.
     pub fn getedges(&mut self) {
-        let (w, h) = apple::chtable(self.fchar.table)
+        let (w, h) = apple::chtable(self.fchar.table, self.level.number)
             .and_then(|t| t.get(self.fchar.image))
             .map_or((0, 0), |i| (i.w as u8, i.h as u8));
         let imwidth = (w * 7 + 1) >> 1;
@@ -236,30 +235,30 @@ impl Game {
             match b {
                 op::CHX => {
                     let d = self.getseq();
-                    self.kid.x = self.addcharx(d);
+                    self.ch.x = self.addcharx(d);
                 }
                 op::CHY => {
                     let d = self.getseq();
-                    self.kid.y = self.kid.y.wrapping_add(d);
+                    self.ch.y = self.ch.y.wrapping_add(d);
                 }
-                op::ABOUTFACE => self.kid.face ^= 0xff,
+                op::ABOUTFACE => self.ch.face ^= 0xff,
                 op::GOTO => {
                     let lo = self.getseq();
                     let hi = self.getseq();
-                    self.kid.seq = seq::addr(lo, hi);
+                    self.ch.seq = seq::addr(lo, hi);
                 }
-                op::UP => self.kid.block_y = self.kid.block_y.wrapping_sub(1),
-                op::DOWN => self.kid.block_y = self.kid.block_y.wrapping_add(1),
-                op::ACT => self.kid.action = self.getseq(),
+                op::UP => self.ch.block_y = self.ch.block_y.wrapping_sub(1),
+                op::DOWN => self.ch.block_y = self.ch.block_y.wrapping_add(1),
+                op::ACT => self.ch.action = self.getseq(),
                 op::SETFALL => {
-                    self.kid.xvel = self.getseq();
-                    self.kid.yvel = self.getseq();
+                    self.ch.xvel = self.getseq();
+                    self.ch.yvel = self.getseq();
                 }
                 op::IFWTLESS => {
                     let lo = self.getseq();
                     let hi = self.getseq();
                     if self.weightless != 0 {
-                        self.kid.seq = seq::addr(lo, hi);
+                        self.ch.seq = seq::addr(lo, hi);
                     }
                 }
                 op::DIE => {}
@@ -268,11 +267,17 @@ impl Game {
                 op::TAP => {
                     let n = self.getseq();
                     match n {
-                        1 => self.add_sound(Sound::Footstep),
-                        2 => self.add_sound(Sound::SmackWall),
+                        0 => self.alertguard = true,
+                        1 => {
+                            self.add_sound(Sound::Footstep);
+                            self.alertguard = true;
+                        }
+                        2 => {
+                            self.add_sound(Sound::SmackWall);
+                            self.alertguard = true;
+                        }
                         _ => {}
                     }
-                    self.alertguard = true;
                 }
                 op::NEXTLEVEL => {
                     self.add_sound(Sound::Upstairs);
@@ -285,66 +290,71 @@ impl Game {
                     }
                 }
                 frame => {
-                    self.kid.posn = frame;
+                    self.ch.posn = frame;
                     return;
                 }
             }
         }
-        log::warn!("animchar: no frame found, seq {:#x}", self.kid.seq);
+        log::warn!("animchar: no frame found, seq {:#x}", self.ch.seq);
     }
 
     fn getseq(&mut self) -> u8 {
-        let b = seq::byte(self.kid.seq);
-        self.kid.seq = self.kid.seq.wrapping_add(1);
+        let b = seq::byte(self.ch.seq);
+        self.ch.seq = self.ch.seq.wrapping_add(1);
         b
     }
 
     /// GRAVITY
     pub fn gravity(&mut self) {
-        if self.kid.action != 4 {
+        if self.ch.action != 4 {
             return;
         }
         let (acc, term) = if self.weightless != 0 { (1, 4) } else { (3, 33) };
-        let v = self.kid.yvel.wrapping_add(acc);
-        self.kid.yvel = if v >= term { term } else { v };
+        let v = self.ch.yvel.wrapping_add(acc);
+        self.ch.yvel = if v >= term { term } else { v };
     }
 
     /// ADDFALL
     pub fn addfall(&mut self) {
-        self.kid.y = self.kid.y.wrapping_add(self.kid.yvel);
-        if self.kid.action != 4 {
+        self.ch.y = self.ch.y.wrapping_add(self.ch.yvel);
+        if self.ch.action != 4 {
             return;
         }
-        self.kid.x = self.addcharx(self.kid.xvel);
+        self.ch.x = self.addcharx(self.ch.xvel);
         self.rereadblocks();
-    }
-
-    /// DECSTR: lose strength; true if any is left.
-    pub fn decstr(&mut self, n: u8) -> bool {
-        self.kid_strength = self.kid_strength.saturating_sub(n);
-        log::info!("strength -{n} -> {}", self.kid_strength);
-        self.kid_strength != 0
     }
 
     /// POTIONEFFECT (MISC.S), for the item REMOVEOBJ recorded.
     fn potion_effect(&mut self) {
+        if self.ch.id != 0 {
+            return;
+        }
         let kind = self.potion;
         log::info!("potion {kind:#x}");
         match kind {
             0xff => {
                 self.gotsword = true;
+                self.lightcolor = 0xff;
+                self.lightning = 3;
                 self.show_message("YOU HAVE THE SWORD".into(), 2 * FPS);
             }
-            1 => self.kid_strength = (self.kid_strength + 1).min(self.max_strength),
+            1 => {
+                if self.kid_strength != self.max_strength {
+                    self.lightcolor = 0x99;
+                    self.lightning = 2;
+                    self.chg_kid_str = 1;
+                }
+            }
             2 => {
-                self.max_strength = (self.max_strength + 1).min(10);
-                self.kid_strength = self.max_strength;
+                self.lightcolor = 0x99;
+                self.lightning = 5;
+                self.boostmeter();
             }
             3 => self.weightless = 200,
             4 => self.inverted = !self.inverted,
             5 => {
-                self.decstr(1);
                 self.add_sound(Sound::Splat);
+                self.chg_kid_str = 0xff;
             }
             _ => {}
         }

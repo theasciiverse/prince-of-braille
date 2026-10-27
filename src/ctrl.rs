@@ -22,6 +22,11 @@ const STEP_OFF_FWD: u8 = 3;
 const STEP_OFF_BACK: u8 = 8;
 const GCLIMBTHRES: u8 = 6;
 const STAIRTHRES: u8 = 30;
+const SWORDTHRES: u8 = 90;
+const SWORDTHRES_N: u8 = (-10i8) as u8;
+const BLOCKTHRES: u8 = 32;
+const GRACEPERIOD: u8 = 9;
+const GDPATIENCE: u8 = 15;
 
 const RJ_CHANGE: u8 = 4;
 const RJ_LOOKAHEAD: u8 = 1;
@@ -44,8 +49,8 @@ impl Game {
 
     /// PLAYERCTRL + CLRJSTK + UserCtrl (facejstk).
     pub fn playerctrl(&mut self, c: Controls) {
-        if self.kid.life & 0x80 != 0 && self.kid_strength == 0 {
-            self.kid.life = 0;
+        if self.ch.life & 0x80 != 0 && self.kid_strength == 0 {
+            self.ch.life = 0;
         }
         if self.stunned != 0 {
             self.stunned -= 1;
@@ -93,18 +98,24 @@ impl Game {
     }
 
     /// GENCTRL
-    fn genctrl(&mut self) {
-        if self.kid.life & 0x80 == 0 {
-            if matches!(self.kid.posn, 15 | 166 | 158 | 171) {
+    pub fn genctrl(&mut self) {
+        if self.ch.life & 0x80 == 0 {
+            if matches!(self.ch.posn, 15 | 166 | 158 | 171) {
                 self.jumpseq(s::DROPDEAD);
             }
             return;
         }
-        if matches!(self.kid.action, 4 | 5) {
+        if matches!(self.ch.action, 4 | 5) {
             self.clrall();
             return;
         }
-        let x = self.kid.posn;
+        if self.ch.sword == 2 {
+            return self.fightctrl();
+        }
+        if self.ch.id >= 2 {
+            return self.guardctrl();
+        }
+        let x = self.ch.posn;
         if x == 15 {
             return self.standing();
         }
@@ -134,6 +145,30 @@ impl Game {
     fn standing(&mut self) {
         if fresh(self.joy.clr_btn) && self.joy.btn && self.trypickup() {
             return;
+        }
+        if self.ch.id != 0 {
+            // shadowman only: down and forward to go en garde
+            if fresh(self.joy.clr_d) && fresh(self.joy.clr_f) {
+                return self.do_engarde();
+            }
+        } else if self.gotsword && (!self.offguard || self.joy.btn) {
+            // if the opponent is within range, go en garde (kid only; off
+            // guard, press the button to draw)
+            if self.enemy_alert >= 2 {
+                let d = self.getopdist();
+                if !(SWORDTHRES..SWORDTHRES_N).contains(&d) {
+                    self.heroic = true;
+                    if d >= (-6i8) as u8 {
+                        return self.doturn();
+                    }
+                    let shadow_landing = self.op.id == 1
+                        && (self.op.action == 3 || (107..118).contains(&self.op.posn));
+                    if !shadow_landing {
+                        return self.do_engarde();
+                    }
+                }
+            }
+            self.offguard = false;
         }
         if self.joy.btn {
             if fresh(self.joy.clr_b) {
@@ -193,7 +228,7 @@ impl Game {
         // facing an edge: step off it
         let id = self.getinfront();
         if is_space(id) && self.getdist() < STEP_OFF_FWD {
-            self.kid.x = self.addcharx(5);
+            self.ch.x = self.addcharx(5);
             self.rereadblocks();
             return;
         }
@@ -210,7 +245,7 @@ impl Game {
                 };
                 if ok {
                     let d = self.getdist().wrapping_sub(9);
-                    self.kid.x = self.addcharx(d);
+                    self.ch.x = self.addcharx(d);
                     self.jumpseq(s::CLIMBDOWN);
                     return;
                 }
@@ -221,8 +256,8 @@ impl Game {
 
     fn stairs(&mut self) {
         let bx = self.rd.bx as i8;
-        self.kid.x = getblockej(bx).wrapping_add(10);
-        self.kid.face = FACE_LEFT;
+        self.ch.x = getblockej(bx).wrapping_add(10);
+        self.ch.face = FACE_LEFT;
         self.jumpseq(s::CLIMBSTAIRS);
         log::info!("climbing stairs");
     }
@@ -263,7 +298,7 @@ impl Game {
     fn arunning(&mut self) {
         if self.joy.jstk_x == 0 {
             // stop running
-            if matches!(self.kid.posn, 7 | 11) {
+            if matches!(self.ch.posn, 7 | 11) {
                 self.clrall();
                 self.joy.clr_f = 1;
                 self.jumpseq(s::RUNSTOP);
@@ -295,7 +330,7 @@ impl Game {
         if !self.joy.btn {
             return self.hangdrop();
         }
-        if self.kid.action != 6 {
+        if self.ch.action != 6 {
             let id = self.getunderft();
             if id == obj::BLOCK || (self.face_left() && matches!(id, obj::PANELWIF | obj::PANELWOF)) {
                 self.jumpseq(s::HANGSTRAIGHT);
@@ -332,7 +367,7 @@ impl Game {
         let id = self.getunderft();
         let sheer = id == obj::BLOCK || (self.face_left() && matches!(id, obj::PANELWOF | obj::PANELWIF));
         if sheer {
-            self.kid.x = self.addcharx((-7i8) as u8);
+            self.ch.x = self.addcharx((-7i8) as u8);
         }
         self.jumpseq(s::HANGDROP);
     }
@@ -351,7 +386,205 @@ impl Game {
     fn doturn(&mut self) {
         self.clrall();
         self.joy.clr_b = 1;
+        // if the enemy is behind you, draw as you turn
+        if self.gotsword && self.enemy_alert >= 2 && self.getopdist() & 0x80 != 0 && self.getdist() >= 2 {
+            self.ch.sword = 2;
+            self.offguard = false;
+            self.jumpseq(s::TURNDRAW);
+            return;
+        }
         self.jumpseq(s::TURN);
+    }
+
+    /// DoEngarde (CTRL.S)
+    pub fn do_engarde(&mut self) {
+        self.clrall();
+        self.joy.clr_f = 1;
+        self.joy.clr_btn = 1;
+        self.ch.sword = 2;
+        log::debug!("char {} en garde", self.ch.id);
+        match self.ch.id {
+            0 => {
+                self.offguard = false;
+                self.jumpseq(s::ENGARDE);
+            }
+            1 => self.jumpseq(s::ENGARDE),
+            _ => self.jumpseq(s::GUARDENGARDE),
+        }
+    }
+
+    /// GuardCtrl: a guard standing alert.
+    fn guardctrl(&mut self) {
+        if self.ch.posn != 166 || !fresh(self.joy.clr_d) {
+            return;
+        }
+        if fresh(self.joy.clr_f) {
+            return self.do_engarde();
+        }
+        self.joy.clr_d = 1;
+        self.jumpseq(s::ALERTTURN);
+    }
+
+    /// FightCtrl: Char is en garde (CharSword = 2).
+    fn fightctrl(&mut self) {
+        if self.ch.action >= 2 {
+            return; // must be on level ground
+        }
+        // once the enemy alert is over, put away your sword (unless
+        // standing on loose floor); if he is behind you, turn to face him
+        let mut drop = false;
+        if self.getunderft() != obj::LOOSE && self.enemy_alert < 2 {
+            drop = true;
+        } else {
+            let d = self.getopdist();
+            if d < SWORDTHRES {
+            } else if d < 128 {
+                drop = true;
+            } else if d < (-4i8) as u8 {
+                self.jumpseq(s::TURNENGARDE);
+                return;
+            }
+        }
+        if drop {
+            // enemy out of range: kid and shadowman drop their guard
+            if self.ch.id == 0 {
+                self.heroic = false;
+            }
+            if self.ch.id < 2 {
+                if self.ch.posn == 171 {
+                    self.ch.sword = 0;
+                    self.jumpseq(s::RESHEATHE);
+                }
+                return;
+            }
+        }
+        // remain en garde
+        let x = self.ch.posn;
+        let strike = if x == 161 {
+            // successful block: restrike or retreat?
+            if !fresh(self.joy.clr_btn) {
+                self.jumpseq(s::RETREAT);
+                return;
+            }
+            true
+        } else {
+            fresh(self.joy.clr_btn)
+        };
+        if strike {
+            if self.ch.id == 0 {
+                self.gdtimer = GDPATIENCE;
+            }
+            self.fight_strike(x);
+            if self.joy.clr_btn == 1 {
+                return; // struck
+            }
+        }
+        if fresh(self.joy.clr_d) {
+            // down to lower your sword
+            if matches!(x, 158 | 170 | 171) {
+                self.joy.clr_d = 1;
+                self.ch.sword = 0;
+                match self.ch.id {
+                    0 => {
+                        self.offguard = true;
+                        self.refract = GRACEPERIOD;
+                        self.heroic = false;
+                        self.jumpseq(s::FASTSHEATHE);
+                    }
+                    1 => self.jumpseq(s::RESHEATHE),
+                    _ => self.jumpseq(s::GOALERTSTAND),
+                }
+                log::debug!("char {} lowers sword", self.ch.id);
+            }
+            return;
+        }
+        // forward to advance, up to block, back to retreat
+        if fresh(self.joy.clr_u) {
+            self.fight_block();
+        } else if fresh(self.joy.clr_f) {
+            self.fight_advance();
+        } else if fresh(self.joy.clr_b) {
+            self.fight_retreat();
+        }
+    }
+
+    /// DoBlock (CTRL.S)
+    fn fight_block(&mut self) {
+        let x = self.ch.posn;
+        if x == 167 {
+            // blocked strike: strike-to-block
+            self.joy.clr_u = 1;
+            self.jumpseq(s::STRIKEBLOCK);
+            return;
+        }
+        if !matches!(x, 158 | 170 | 171 | 168 | 165) {
+            return;
+        }
+        let block = |g: &mut Game| {
+            g.joy.clr_u = 1;
+            g.jumpseq(s::READYBLOCK);
+        };
+        if self.getopdist() < BLOCKTHRES {
+            let op = self.op.posn;
+            if self.ch.id != 0 {
+                // the enemy sees the kid one frame ahead
+                if op == 152 {
+                    block(self);
+                }
+                return;
+            }
+            match op {
+                168 => return, // one frame too early: wait
+                151 | 152 | 162 => return block(self),
+                153 => {
+                    // one frame too late: skip a frame
+                    block(self);
+                    self.animchar();
+                    return;
+                }
+                _ => {}
+            }
+        }
+        // block missed
+        if self.ch.id != 0 {
+            self.fight_retreat(); // the enemy doesn't waste blocks
+        } else {
+            block(self);
+        }
+    }
+
+    /// DoStrike (CTRL.S), from frame `x`.
+    fn fight_strike(&mut self, x: u8) {
+        let seq = match x {
+            157 | 158 | 170 | 171 | 165 => {
+                // the kid is fast, others slow
+                if self.ch.id == 0 {
+                    s::FASTSTRIKE
+                } else {
+                    s::STRIKE
+                }
+            }
+            150 | 161 => s::BLOCKTOSTRIKE,
+            _ => return,
+        };
+        self.joy.clr_btn = 1;
+        self.jumpseq(seq);
+    }
+
+    /// DoRetreat (CTRL.S)
+    fn fight_retreat(&mut self) {
+        if matches!(self.ch.posn, 158 | 170 | 171) {
+            self.joy.clr_b = 1;
+            self.jumpseq(s::RETREAT);
+        }
+    }
+
+    /// DoAdvance (CTRL.S)
+    fn fight_advance(&mut self) {
+        if matches!(self.ch.posn, 158 | 170 | 171) {
+            self.joy.clr_f = 1;
+            self.jumpseq(if self.ch.id == 0 { s::FASTADVANCE } else { s::ADVANCE });
+        }
     }
 
     fn dostandjump(&mut self) {
@@ -385,12 +618,12 @@ impl Game {
                 // back to the ledge: jumpbackhang
                 self.getabove();
                 let d = self.getdist().wrapping_sub(10);
-                self.kid.x = self.addcharx(d);
+                self.ch.x = self.addcharx(d);
                 self.jumpseq(s::JUMPBACKHANG);
                 return;
             }
             let d = self.getdist().wrapping_sub(14);
-            self.kid.x = self.addcharx(d);
+            self.ch.x = self.addcharx(d);
             self.rereadblocks();
             return self.dojumphang();
         }
@@ -407,17 +640,17 @@ impl Game {
             true
         };
         if long {
-            self.kid.x = self.addcharx(atemp.wrapping_sub(4));
+            self.ch.x = self.addcharx(atemp.wrapping_sub(4));
             self.jumpseq(s::JUMPHANG_LONG);
         } else {
-            self.kid.x = self.addcharx(atemp);
+            self.ch.x = self.addcharx(atemp);
             self.jumpseq(s::JUMPHANG_MED);
         }
     }
 
     /// DoRunjump: calibrate so the foot pushes off at the edge.
     fn dorunjump(&mut self) {
-        if self.kid.posn < 7 {
+        if self.ch.posn < 7 {
             return;
         }
         let ztemp = self.addcharx(RJ_CHANGE);
@@ -426,7 +659,7 @@ impl Game {
         let mut edge = false;
         loop {
             bx += if self.face_left() { -1 } else { 1 };
-            let (sc, by) = (self.kid.scrn, self.kid.block_y as i8 as i32);
+            let (sc, by) = (self.ch.scrn, self.ch.block_y as i8 as i32);
             let id = self.rdblock(sc, bx, by);
             if id == obj::SPIKES || is_space(id) {
                 edge = true;
@@ -450,7 +683,7 @@ impl Game {
             } else {
                 (-3i8) as u8 // jumped too late; make it look good anyway
             };
-            self.kid.x = self.addcharx(fudge.wrapping_add(RJ_CHANGE));
+            self.ch.x = self.addcharx(fudge.wrapping_add(RJ_CHANGE));
         }
         self.clrall();
         self.joy.clr_u = 1;
@@ -463,16 +696,16 @@ impl Game {
         let (d, what) = self.getfwddist();
         let step = if d != 0 {
             d
-        } else if what == 1 || self.kid.repeat == 0 {
+        } else if what == 1 || self.ch.repeat == 0 {
             // barrier: step through; second try at an edge: step off
             11
         } else {
             // first time at an edge: test with the foot
-            self.kid.repeat = 0;
+            self.ch.repeat = 0;
             self.jumpseq(s::TESTFOOT);
             return;
         };
-        self.kid.repeat = step;
+        self.ch.repeat = step;
         // stepfwd1..13 are sequences 29..41; fullstep (42) is step 14
         self.jumpseq(s::STEPFWD1 - 1 + step);
     }
@@ -482,12 +715,12 @@ impl Game {
         self.joy.clr_u = 1;
         let (d, what) = self.getfwddist();
         if d < 4 && what == 1 {
-            self.kid.x = self.addcharx(d.wrapping_sub(3));
+            self.ch.x = self.addcharx(d.wrapping_sub(3));
         }
         let ztemp = self.facedx(JUMPUPREACH);
         let a = self.getbasex().wrapping_add(JUMPUPANGLE).wrapping_add(ztemp);
         let bx = getblockx(a).0 as i32;
-        let (sc, by) = (self.kid.scrn, self.kid.block_y as i8 as i32 - 1);
+        let (sc, by) = (self.ch.scrn, self.ch.block_y as i8 as i32 - 1);
         let id = self.rdblock(sc, bx, by);
         if id == obj::BLOCK || !is_space(id) {
             self.jumpseq(s::JUMPUP);
@@ -500,16 +733,16 @@ impl Game {
     // CHECKFLOOR and friends
 
     pub fn checkfloor(&mut self) {
-        match self.kid.action {
+        match self.ch.action {
             6 | 2 => {}
             5 => {
-                if matches!(self.kid.posn, 109 | 185) {
+                if matches!(self.ch.posn, 109 | 185) {
                     self.onground();
                 }
             }
             4 => self.falling(),
             3 => {
-                if (102..106).contains(&self.kid.posn) {
+                if (102..106).contains(&self.ch.posn) {
                     self.fallon();
                 }
             }
@@ -524,8 +757,8 @@ impl Game {
     /// If he's passed through the floor plane, change CharBlockY; if the
     /// floor is solid, stop him.
     fn falling(&mut self) {
-        let by = self.kid.block_y as i8 as i32;
-        if self.kid.y < self.floor_y(by + 1) {
+        let by = self.ch.block_y as i8 as i32;
+        if self.ch.y < self.floor_y(by + 1) {
             return self.fallon();
         }
         let mut id = self.getunderft();
@@ -533,15 +766,15 @@ impl Game {
             id = self.insideblock();
         }
         if is_space(id) {
-            self.kid.block_y = self.kid.block_y.wrapping_add(1);
+            self.ch.block_y = self.ch.block_y.wrapping_add(1);
             return;
         }
         self.hitflr();
     }
 
     fn hitflr(&mut self) {
-        let by = self.kid.block_y as i8 as i32;
-        self.kid.y = self.floor_y(by + 1);
+        let by = self.ch.block_y as i8 as i32;
+        self.ch.y = self.floor_y(by + 1);
         if self.getunderft() == obj::SPIKES {
             if self.getspikes() != 0 {
                 return self.doimpale();
@@ -550,9 +783,9 @@ impl Game {
             // landed too close to an edge?
             let id = self.getinfront();
             if is_space(id) && self.getdist() < 4 {
-                self.kid.x = self.addcharx((-3i8) as u8);
+                self.ch.x = self.addcharx((-3i8) as u8);
             }
-            if self.kid.life & 0x80 != 0 {
+            if self.ch.life & 0x80 != 0 {
                 let mut spikes = false;
                 if self.getdist() >= 12 && self.getbehind() == obj::SPIKES {
                     spikes = true;
@@ -565,60 +798,76 @@ impl Game {
                 }
             }
         }
-        let seq = if self.kid.life & 0x80 == 0 {
-            self.add_sound(Sound::Splat);
-            s::HARDLAND
-        } else if self.kid.yvel < OOF_VELOCITY {
-            if self.kid.sword == 2 {
+        let soft = |g: &mut Game| {
+            // guards always land en garde
+            if g.ch.id >= 2 || g.ch.sword == 2 {
+                g.ch.sword = 2;
                 s::LANDENGARDE
             } else {
                 s::SOFTLAND
             }
-        } else if self.kid.yvel < DEATH_VELOCITY {
-            self.add_sound(Sound::Splat);
-            if self.decstr(1) {
-                s::MEDLAND
-            } else {
-                s::HARDLAND
+        };
+        let hard = |g: &mut Game, dec: bool| {
+            if dec {
+                g.decstr(100);
             }
-        } else {
-            self.decstr(100);
-            self.add_sound(Sound::Splat);
+            g.add_sound(Sound::Splat);
             s::HARDLAND
         };
-        log::debug!("land yvel={} seq={}", self.kid.yvel, seq);
+        let seq = if self.ch.life & 0x80 == 0 {
+            // dead before he hits the ground
+            hard(self, true)
+        } else if self.ch.yvel < OOF_VELOCITY {
+            soft(self)
+        } else if self.ch.yvel < DEATH_VELOCITY {
+            match self.ch.id {
+                1 => soft(self), // the shadowman lands easy
+                id if id >= 2 => hard(self, true), // guards can't survive two storeys
+                _ => {
+                    if self.decstr(1) {
+                        self.add_sound(Sound::Splat);
+                        s::MEDLAND
+                    } else {
+                        hard(self, false)
+                    }
+                }
+            }
+        } else {
+            hard(self, true)
+        };
+        log::debug!("land yvel={} seq={}", self.ch.yvel, seq);
         self.jumpseq(seq);
         self.animchar();
-        self.kid.yvel = 0;
+        self.ch.yvel = 0;
     }
 
     /// Hasn't hit the floor yet: can he grab the edge above?
     fn fallon(&mut self) {
-        if !(self.joy.btn && self.kid.life & 0x80 != 0) {
+        if !(self.joy.btn && self.ch.life & 0x80 != 0) {
             return;
         }
-        if self.kid.yvel >= GRABSPEED {
+        if self.ch.yvel >= GRABSPEED {
             return;
         }
-        let by = self.kid.block_y as i8 as i32;
-        if self.kid.y.wrapping_add(GRABLEAD) < self.floor_y(by + 1) {
+        let by = self.ch.block_y as i8 as i32;
+        if self.ch.y.wrapping_add(GRABLEAD) < self.floor_y(by + 1) {
             return;
         }
-        self.savekidx = self.kid.x;
-        self.kid.x = self.addcharx(GRABREACH);
+        self.savekidx = self.ch.x;
+        self.ch.x = self.addcharx(GRABREACH);
         self.rereadblocks();
         self.blockid = self.getabove();
         let a = self.getaboveinf();
         if !self.checkledge(a) {
-            self.kid.x = self.savekidx;
+            self.ch.x = self.savekidx;
             self.rereadblocks();
             return;
         }
         let d = self.getdist();
-        self.kid.x = self.addcharx(d);
-        let by = self.kid.block_y as i8 as i32;
-        self.kid.y = self.floor_y(by + 1);
-        self.kid.yvel = 0;
+        self.ch.x = self.addcharx(d);
+        let by = self.ch.block_y as i8 as i32;
+        self.ch.y = self.floor_y(by + 1);
+        self.ch.yvel = 0;
         self.jumpseq(s::FALLHANG);
         self.animchar();
         self.stunned = STUNTIME;
@@ -641,9 +890,9 @@ impl Game {
     }
 
     fn startfall(&mut self) {
-        self.kid.sword = 0;
-        self.kid.block_y = self.kid.block_y.wrapping_add(1);
-        let p = self.kid.posn;
+        self.ch.sword = 0;
+        self.ch.block_y = self.ch.block_y.wrapping_add(1);
+        let p = self.ch.posn;
         self.rjumpflag = p;
         log::debug!("startfall from posn {p}");
         let seq = match p {
@@ -652,11 +901,24 @@ impl Game {
             26 => s::JUMPFALL,
             44 => s::RJUMPFALL,
             81..=85 => {
-                self.kid.x = self.addcharx(5);
+                self.ch.x = self.addcharx(5);
                 self.rereadblocks();
                 s::STEPFALL2
             }
-            150..=179 => s::FIGHTFALL,
+            150..=179 => {
+                if self.ch.id >= 2 {
+                    // did the guard step off forwards or backwards?
+                    if self.ch.xvel & 0x80 != 0 {
+                        s::EFIGHTFALL
+                    } else {
+                        self.droppedout = false;
+                        s::EFIGHTFALLFWD
+                    }
+                } else {
+                    self.droppedout = true; // for the guard's benefit
+                    s::FIGHTFALL
+                }
+            }
             _ => s::STEPFALL,
         };
         self.jumpseq(seq);
@@ -678,7 +940,7 @@ impl Game {
             self.rereadblocks();
             return;
         }
-        self.kid.x = self.addcharx(0xff);
+        self.ch.x = self.addcharx(0xff);
         self.rereadblocks();
     }
 
@@ -693,19 +955,19 @@ impl Game {
         } else {
             (self.getdist() ^ 0xff).wrapping_add(8)
         };
-        self.kid.x = self.addcharx(delta);
+        self.ch.x = self.addcharx(delta);
         self.rereadblocks();
         self.getunderft()
     }
 
     /// CHECKPRESS: stepping on a pressure plate or loose floor?
     pub fn checkpress(&mut self) {
-        let p = self.kid.posn;
+        let p = self.ch.posn;
         let hanging = (87..100).contains(&p) || (135..141).contains(&p);
         let id = if hanging {
             self.getabove()
         } else {
-            if !matches!(self.kid.action, 7 | 5 | 0 | 1) {
+            if !matches!(self.ch.action, 7 | 5 | 0 | 1) {
                 return;
             }
             if p == 79 {
@@ -722,7 +984,7 @@ impl Game {
         };
         match id {
             obj::UPRESSPLATE | obj::PRESSPLATE => {
-                if self.kid.life & 0x80 != 0 {
+                if self.ch.life & 0x80 != 0 {
                     self.pushpp();
                 } else {
                     self.jampp();
@@ -738,11 +1000,11 @@ impl Game {
 
     /// CHECKIMPALE: running or jumping onto spikes.
     pub fn checkimpale(&mut self) {
-        let (sc, bx, by) = (self.kid.scrn, self.kid.block_x as i8 as i32, self.kid.block_y as i8 as i32);
+        let (sc, bx, by) = (self.ch.scrn, self.ch.block_x as i8 as i32, self.ch.block_y as i8 as i32);
         if self.rdblock(sc, bx, by) != obj::SPIKES {
             return;
         }
-        let p = self.kid.posn;
+        let p = self.ch.posn;
         if p < 7 {
             return;
         }
@@ -760,11 +1022,11 @@ impl Game {
     /// DOIMPALE (rd = the spikes)
     pub fn doimpale(&mut self) {
         self.jamspikes();
-        let by = self.kid.block_y as i8 as i32;
-        self.kid.y = self.floor_y(by + 1);
-        self.kid.x = getblockej(self.rd.bx as i8).wrapping_add(10);
-        self.kid.x = self.addcharx(8);
-        self.kid.yvel = 0;
+        let by = self.ch.block_y as i8 as i32;
+        self.ch.y = self.floor_y(by + 1);
+        self.ch.x = getblockej(self.rd.bx as i8).wrapping_add(10);
+        self.ch.x = self.addcharx(8);
+        self.ch.yvel = 0;
         self.add_sound(Sound::Impaled);
         self.decstr(100);
         self.jumpseq(s::IMPALE);
@@ -779,7 +1041,7 @@ impl Game {
             if is_space(self.getbehind()) {
                 return false;
             }
-            self.kid.x = self.addcharx((-14i8) as u8);
+            self.ch.x = self.addcharx((-14i8) as u8);
             self.rereadblocks();
         }
         let id = self.getinfront();
@@ -791,14 +1053,14 @@ impl Game {
     }
 
     fn pickitup(&mut self, id: u8) {
-        if self.kid.posn != 109 {
+        if self.ch.posn != 109 {
             // crouch first, then pick up
             let (d, what) = self.getfwddist();
             if what != 2 {
-                self.kid.x = self.addcharx(d);
+                self.ch.x = self.addcharx(d);
             }
             if !self.face_left() {
-                self.kid.x = self.addcharx((-2i8) as u8);
+                self.ch.x = self.addcharx((-2i8) as u8);
             }
             self.docrouch();
             return;

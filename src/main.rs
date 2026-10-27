@@ -14,6 +14,7 @@ mod bg;
 mod coll;
 mod ctrl;
 mod game;
+mod guard;
 mod input;
 mod level;
 mod mover;
@@ -148,6 +149,14 @@ fn run(terminal: &mut DefaultTerminal, level: u8, exact: bool, theme: theme::The
                 g.phase,
                 input.controls(now)
             );
+            if g.shad.face != guard::NO_CHAR {
+                let o = &g.shad;
+                log::debug!(
+                    "opp id={} scrn={} x={} y={} posn={} action={} sword={} life={:#x} str={}/{} alert={} prog={}",
+                    o.id, o.scrn, o.x, o.y, o.posn, o.action, o.sword, o.life, g.opp_strength, g.max_opp_str,
+                    g.enemy_alert, g.guardprog
+                );
+            }
         }
     }
     Ok(())
@@ -193,10 +202,18 @@ fn dump_frames(level: u8, script: &str, theme: theme::Theme) {
         render::paint_status(&mut buf, Rect::new(0, h, w, 1), &g, "");
         let k = &g.kid;
         println!(
-            "== {tok}  scrn={} x={} y={} posn={} action={} face={} bx={} by={} str={} phase={:?} trobs={} mobs={}",
+            "== {tok}  scrn={} x={} y={} posn={} action={} face={} bx={} by={} sword={} str={} phase={:?} trobs={} mobs={}",
             k.scrn, k.x, k.y, k.posn, k.action, if k.face == game::FACE_LEFT { "L" } else { "R" },
-            k.block_x as i8, k.block_y as i8, g.kid_strength, g.phase, g.trobs.len(), g.mobs.len()
+            k.block_x as i8, k.block_y as i8, k.sword, g.kid_strength, g.phase, g.trobs.len(), g.mobs.len()
         );
+        if g.shad.face != guard::NO_CHAR {
+            let o = &g.shad;
+            println!(
+                "   opp id={} scrn={} x={} y={} posn={} action={} face={} by={} sword={} life={:#x} str={}/{} alert={}",
+                o.id, o.scrn, o.x, o.y, o.posn, o.action, if o.face == game::FACE_LEFT { "L" } else { "R" },
+                o.block_y as i8, o.sword, o.life, g.opp_strength, g.max_opp_str, g.enemy_alert
+            );
+        }
         let ansi = std::env::var("POB_ANSI").is_ok();
         for y in 0..=h {
             let mut line = String::new();

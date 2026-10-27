@@ -134,14 +134,14 @@ impl Game {
         }
         let left = getblockxp(self.edges.left).0;
         for bx in left..=right {
-            let (scrn, mut by) = (self.kid.scrn, self.kid.block_y as i8 as i32);
+            let (scrn, mut by) = (self.ch.scrn, self.ch.block_y as i8 as i32);
             loop {
                 let id = self.rdblock(scrn, bx as i32, by);
                 if id == obj::SPIKES {
                     self.trigspikes();
                     break;
                 }
-                if !is_space(id) || self.rd.scrn == 0 || self.rd.scrn != self.kid.scrn {
+                if !is_space(id) || self.rd.scrn == 0 || self.rd.scrn != self.ch.scrn {
                     break;
                 }
                 by += 1;
@@ -295,7 +295,7 @@ impl Game {
     /// shakeloose (TOPCTRL.S): landing jars the floorboards.
     pub fn shakeloose(&mut self) {
         let j = std::mem::take(&mut self.jarabove);
-        let by = self.kid.block_y as i8 as i32;
+        let by = self.ch.block_y as i8 as i32;
         match j {
             j if j < 0 => self.shakem(self.vis_scrn, by),
             j if j > 0 => self.shakem(self.vis_scrn, by - 1),
@@ -498,8 +498,17 @@ impl Game {
         if *state >= EMAXVAL {
             *d = -1;
             self.add_sound(Sound::GateDown);
-            self.exitopen = true;
+            self.exitopen = 1;
             log::info!("exit open");
+            self.mirappear();
+        }
+    }
+
+    /// MIRAPPEAR (SUBS.S): on level 4 the mirror appears when the exit opens.
+    fn mirappear(&mut self) {
+        if self.level.number == 4 {
+            let i = Level::index(4, 4, 0);
+            self.level.set_type(i, obj::MIRROR);
         }
     }
 
@@ -587,8 +596,10 @@ impl Game {
         }
     }
 
+    /// checkcrush: did the falling floor land on the kid?
     fn checkcrush(&mut self, m: &Mob) {
-        let k = self.kid;
+        self.load_kid();
+        let k = self.ch;
         if m.scrn != k.scrn || (m.x / 4) as i8 != k.block_x as i8 {
             return;
         }
@@ -602,12 +613,13 @@ impl Game {
             return;
         }
         let by = k.block_y as i8 as i32;
-        self.kid.y = FLOOR_Y[(by + 1).clamp(0, 4) as usize];
+        self.ch.y = FLOOR_Y[(by + 1).clamp(0, 4) as usize];
         if !self.decstr(1) {
             self.jumpseq(s::HARDLAND);
         } else if k.posn != 109 {
             self.jumpseq(s::CRUSH);
         }
+        self.save_kid();
         log::info!("crushed by falling floor");
     }
 }

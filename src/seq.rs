@@ -3,10 +3,9 @@
 #[path = "gen/seqtable.rs"]
 mod seqtable;
 #[path = "gen/framedef.rs"]
-#[allow(dead_code)] // altset 2 and the sword table come in with guards and swords
 mod framedef;
 
-pub use seqtable::{op, seq};
+pub use seqtable::{op, seq, ORG};
 
 /// Start of sequence `n` (1-114) as an index into the table (JUMPSEQ).
 pub fn start(n: u8) -> u16 {
@@ -54,18 +53,27 @@ pub fn kid_frame(posn: u8) -> Frame {
     entry(&framedef::FDEF, posn as usize - 1)
 }
 
-/// Guard frames: 150-189 come from altset 1, falling 102-106 from 172-176.
-#[allow(dead_code)]
-pub fn guard_frame(posn: u8) -> Frame {
-    match posn {
-        102..=106 => entry(&framedef::ALTSET1, (posn - 102 + 172 - 150) as usize),
-        150..=189 => entry(&framedef::ALTSET1, (posn - 150) as usize),
-        _ => kid_frame(posn),
+/// GETFRAMEINFO + usealtsets: the frame for `posn` as drawn for CharID
+/// `id`. The kid (0) and the mouse (24) use the main set; the shadowman (1)
+/// takes 150-189 from altset 1; guards and the skeleton (2-4) also swap the
+/// falling frames 102-106 for 172-176; the princess and vizier (5 and up)
+/// use altset 2 for everything.
+pub fn frame(id: u8, posn: u8) -> Frame {
+    if id == 0 || id == 24 || posn == 0 {
+        return kid_frame(posn);
+    }
+    if id >= 5 {
+        return entry(&framedef::ALTSET2, posn as usize - 1);
+    }
+    let p = if id >= 2 && (102..107).contains(&posn) { posn + 70 } else { posn };
+    if (150..190).contains(&p) {
+        entry(&framedef::ALTSET1, (p - 150) as usize)
+    } else {
+        kid_frame(p)
     }
 }
 
 /// Sword table entry (image, dx, dy) for a 1-based sword frame.
-#[allow(dead_code)]
 pub fn sword(n: u8) -> (u8, u8, u8) {
     let t = &framedef::SWORDTAB;
     let i = (n as usize).saturating_sub(1) * 3;
@@ -101,5 +109,16 @@ mod tests {
         assert_eq!(decode_image(&f), (0, 0x0f));
         // jumphang frames use chtable2
         assert_eq!(decode_image(&kid_frame(67)).0, 1);
+    }
+
+    #[test]
+    fn guards_use_altset_1_for_fighting_and_falling() {
+        // en garde (158) comes from the guard set, chtable4
+        assert_eq!(frame(2, 158), entry(&framedef::ALTSET1, 8));
+        assert_eq!(decode_image(&frame(2, 158)).0, 3);
+        // falling 102 becomes 172 for guards, not for the shadowman
+        assert_eq!(frame(2, 102), frame(2, 172));
+        assert_eq!(frame(1, 102), kid_frame(102));
+        assert_eq!(frame(0, 158), kid_frame(158));
     }
 }

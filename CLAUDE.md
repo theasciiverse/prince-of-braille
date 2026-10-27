@@ -111,11 +111,12 @@ original 6502 routines, run on the original data:
 | `src/level.rs` | EQ.S | blueprint layout, RDBLOCK |
 | `src/seq.rs` | | sequence + frame tables |
 | `src/subs.rs` | CTRLSUBS.S, SUBS.S | ANIMCHAR, GETBASEX/GETDIST, SETUPCHAR, GETEDGES, CHECKLEDGE, gravity |
-| `src/ctrl.rs` | CTRL.S | all kid control: run, stop, turn, step, stand/run jump, jump up, hang, climb up/down, crouch, crawl, falling, grabbing, landing, impaling, pickups |
+| `src/ctrl.rs` | CTRL.S | all kid control: run, stop, turn, step, stand/run jump, jump up, hang, climb up/down, crouch, crawl, falling, grabbing, landing, impaling, pickups; FightCtrl (strike, block, advance, retreat, sheathe) and GuardCtrl for every character en garde |
 | `src/coll.rs` | COLL.S | frame-to-frame barrier collision, bumps, GETFWDDIST |
 | `src/mover.rs` | MOVER.S | gates, pressure plates and links, loose floors and falling floor MOBs, spikes, exit door, torches, bubbling flasks |
 | `src/bg.rs` | FRAMEADV.S, BGDATA.S | screen drawing with the A/B/C/D/front piece system |
-| `src/game.rs` | TOPCTRL.S, AUTO.S | frame loop (DoKid order), screen cuts, timer, death, level progression |
+| `src/game.rs` | TOPCTRL.S, AUTO.S | frame loop (NextFrame order: DoKid, DoShad, CHECKSTRIKE, ...), the Char/Kid/Shad/Op buffers, screen cuts, timer, death, level progression |
+| `src/guard.rs` | AUTO.S, MISC.S, TOPCTRL.S | guards placed from the level's INFO tables, guard AI (GuardProg, EnGarde, GenFight, the per-program strike/block/advance probabilities), sword contact (CHECKSTRIKE/CHECKSTAB/STABCHAR), strength meters (DECSTR, chgmeters), guards left behind or following you between screens, the skeleton, the shadowman's scripted appearances, the mouse |
 | `src/render.rs` | | terminal output (below) |
 | `src/input.rs` | SPECIALK.S | keys to joystick + clr flags |
 
@@ -158,12 +159,42 @@ headless with scripted input and prints frames (`POB_ANSI=1` for colour,
 `POB_PPM_DIR=dir` for raw NTSC frames); `tools/ansi2png.py` turns an ANSI
 dump into PNGs.
 
-**Not done yet:** guards and sword fighting (no guards appear; altset and
-sword tables are already extracted), the shadow, princess/vizier
-cutscenes, slicers and the mirror are only partly ported, sound (events are
-logged only), the upside-down potion effect, CROPCHAR-style cropping (a
-stand-in redraws floor lips over a hanging kid), level-specific scripting
-beyond levels 1, 6 and 13. The timer runs on real minutes at 12 fps.
+**Guards and sword fighting** (2026-10-28): ported from AUTO.S, CTRL.S
+and MISC.S. As in the original every character routine works on one
+"Char" buffer (`ch`) with its opponent in `op`; DoKid loads the kid,
+DoShad the guard (`shad`), and both run the same control and physics
+code. The guard AI "presses keys" (DoFwd, DoStrike, ...) that GENCTRL
+then acts on. Guards come from the blueprint's INFO tables (GdStartBlock,
+Face, X, Prog, Seq), with strength and uniform colour per level and
+program as in AUTO.S; a red-uniform guard is drawn one pixel over, as the
+Apple did. A live guard left behind starts fresh when you come back; a
+dead one stays dead. Strength changes go through ChgKidStr/ChgOppStr and
+are applied at the end of the frame (chgmeters), so an impact star shows
+on whoever was hit that frame. The opponent's meter is at the right of
+the status line. `RUST_LOG=info` logs fight events (en garde, strikes,
+blocks, stabs, deaths); the 500 ms debug snapshot includes the opponent.
+
+**Where the source left a choice:**
+- ADDGUARD calls getgdstrength before it sets `guardprog` for the new
+  guard, so a guard's extra strength (program 4 only) comes from the
+  previous guard's program. Kept as the original has it.
+- The vizier waits for his music (SongCue) before he draws. There is no
+  music yet, so he draws as soon as he sees you.
+- RND here is a xorshift, not the original generator: the same
+  probabilities, a different sequence.
+- Level 7 starts with the kid dropped into screen 1 from the screen
+  above (STARTKID's cut). In the port he falls down the shaft at column 2
+  and dies on screen 3; column 1 has floor one storey down, so the
+  original probably lands him there. Not yet found where the port's fall
+  differs by those few pixels: play-test this.
+
+**Not done yet:** the shadow (level 4 mirror emergence, level 6 jump,
+level 12 merge are coded in guard.rs but the mirror and its reflection
+are not), princess/vizier cutscenes, slicers and the mirror are only
+partly ported, sound (events are logged only), the upside-down potion
+effect, screen flashes (lightning is tracked but not drawn),
+CROPCHAR-style cropping (a stand-in redraws floor lips over a hanging
+kid). The timer runs on real minutes at 12 fps.
 
 ## Rights: what Mechner's README actually says
 
@@ -206,3 +237,7 @@ First playable cut (2026-10-03): kid movement, traps, all 14 original
 levels, hybrid Braille/block rendering. See "What exists" and "Rights"
 above. The design text above this section is from the 2026-07-08 ideation
 and is kept as written.
+
+2026-10-28: guards and sword fighting, the skeleton, guards following
+you between screens, the level 3 checkpoint and the level 7 drop-in
+start; the kid has his sword from level 2 on, as in the original.

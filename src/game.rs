@@ -23,6 +23,9 @@ pub const FLOOR_Y: [u8; 5] = [248, 55, 118, 181, 244];
 pub const BLOCK_AY: [u8; 5] = [255, 62, 125, 188, 251];
 
 pub const SCRN_LEFT: u8 = 58;
+pub const SCRN_RIGHT: u8 = SCRN_LEFT + 140 - 1;
+pub const BOT_CUT_EDGE: u8 = 191 + 24;
+const MOUSETIMER: u8 = 150;
 pub const ANGLE: u8 = 7;
 
 /// Character variables (EQ.S "Char data").
@@ -122,6 +125,7 @@ pub enum Sound {
     LooseCrash,
     Drink,
     Upstairs,
+    SwordClash,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -137,7 +141,14 @@ pub enum Phase {
 
 pub struct Game {
     pub level: Level,
+    /// Char: the character being moved right now (a copy of `kid` or
+    /// `shad`, loaded and saved the way CTRLSUBS.S LOADKID/SAVESHAD do)
+    pub ch: Char,
+    /// Op: the opponent of whoever is in `ch`
+    pub op: Char,
     pub kid: Char,
+    /// the shadowman or other opponent; face = NO_CHAR when there is none
+    pub shad: Char,
     pub joy: Joy,
     pub frame: Frame,
     pub fchar: FChar,
@@ -151,6 +162,27 @@ pub struct Game {
     pub jarabove: i8,
     pub alertguard: bool,
     pub gotsword: bool,
+    // fighting (AUTO.S, GAMEEQ.S)
+    pub enemy_alert: u8,
+    pub guardprog: u8,
+    pub guard_color: u8,
+    pub justblocked: u8,
+    pub gdtimer: u8,
+    pub refract: u8,
+    pub offguard: bool,
+    pub droppedout: bool,
+    pub heroic: bool,
+    pub createshad: bool,
+    pub shadowaction: u8,
+    /// level 12: frames of kid and shadow flashing after they merge; -1 after
+    pub mergetimer: i8,
+    pub playcount: u8,
+    pub prerecptr: usize,
+    /// white or coloured screen flashes left (lightning, lightcolor)
+    pub lightning: u8,
+    pub lightcolor: u8,
+    /// level 3: past the first gate, so a restart starts there
+    pub milestone: bool,
     pub infrontx: i32,
     pub behindx: i32,
     pub abovey: i32,
@@ -170,12 +202,20 @@ pub struct Game {
     // MOVER.S
     pub trobs: Vec<Trob>,
     pub mobs: Vec<Mob>,
-    pub exitopen: bool,
+    /// set when the exit opens; some levels use it as a counter or flag
+    pub exitopen: u8,
     // strength and time
     pub kid_strength: u8,
     pub max_strength: u8,
+    pub opp_strength: u8,
+    pub max_opp_str: u8,
+    /// this frame's strength changes, applied by CHGMETERS (as bytes)
+    pub chg_kid_str: u8,
+    pub chg_opp_str: u8,
     pub frames_left: u32,
     pub vis_scrn: u8,
+    /// CUTTIMER: frames to wait before the next screen cut
+    pub cuttimer: u8,
     pub phase: Phase,
     pub next_level: bool,
     pub sounds: Vec<Sound>,
@@ -193,7 +233,10 @@ impl Game {
     pub fn new(level: u8) -> Game {
         let mut g = Game {
             level: Level::load(level),
+            ch: Char::default(),
+            op: Char::default(),
             kid: Char::default(),
+            shad: Char { face: crate::guard::NO_CHAR, id: 2, ..Char::default() },
             joy: Joy::default(),
             frame: Frame::default(),
             fchar: FChar::default(),
@@ -205,6 +248,23 @@ impl Game {
             jarabove: 0,
             alertguard: false,
             gotsword: false,
+            enemy_alert: 0,
+            guardprog: 0,
+            guard_color: 0,
+            justblocked: 0,
+            gdtimer: 0,
+            refract: 0,
+            offguard: false,
+            droppedout: false,
+            heroic: false,
+            createshad: false,
+            shadowaction: 0,
+            mergetimer: 0,
+            playcount: 0,
+            prerecptr: 0,
+            lightning: 0,
+            lightcolor: 0,
+            milestone: false,
             infrontx: 0,
             behindx: 0,
             abovey: 0,
@@ -222,11 +282,16 @@ impl Game {
             blockedge: 0,
             trobs: Vec::new(),
             mobs: Vec::new(),
-            exitopen: false,
+            exitopen: 0,
             kid_strength: 3,
             max_strength: 3,
+            opp_strength: 0,
+            max_opp_str: 0,
+            chg_kid_str: 0,
+            chg_opp_str: 0,
             frames_left: MINUTES * 60 * FPS,
             vis_scrn: 1,
+            cuttimer: 0,
             phase: Phase::Playing,
             next_level: false,
             sounds: Vec::new(),
@@ -256,36 +321,65 @@ impl Game {
         self.sounds.push(s);
     }
 
-    /// Load level `n` and put the kid at its start (SUBS.S STARTKID).
+    /// Load level `n` and put the kid at its start (TOPCTRL.S RESTART,
+    /// SUBS.S STARTKID).
     pub fn start_level(&mut self, n: u8, keep_time: bool) {
         let n = n.min(crate::level::NUM_LEVELS - 1);
         log::info!("start level {n}");
+        if n != self.level.number {
+            self.milestone = false;
+        }
         self.level = Level::load(n);
         crate::mover::set_initials(&mut self.level);
+        self.initialguards();
         self.trobs.clear();
         self.mobs.clear();
-        self.exitopen = false;
+        self.exitopen = 0;
         self.phase = Phase::Playing;
         self.next_level = false;
         self.stunned = 0;
         self.dead_frames = 0;
         self.inverted = false;
+        self.lightning = 0;
+        self.mergetimer = 0;
+        self.enemy_alert = 0;
+        self.createshad = false;
+        self.heroic = false;
+        self.chg_kid_str = 0;
+        self.chg_opp_str = 0;
+        self.opp_strength = 0;
+        self.playcount = 0;
+        self.prerecptr = 0;
+        // Level 1 starts without the sword
+        self.gotsword = n != 1;
+        self.shad = Char { id: 2, face: crate::guard::NO_CHAR, ..Char::default() };
         if !keep_time {
             self.frames_left = MINUTES * 60 * FPS;
         }
-        self.kid_strength = self.max_strength;
-        let (scrn, block, face) = self.level.kid_start();
+        self.startkid(n);
+        self.vis_scrn = 0;
+        self.prepcut(self.kid.scrn);
+        self.show_message(format!("LEVEL {n}"), 3 * FPS);
+    }
+
+    /// STARTKID
+    fn startkid(&mut self, n: u8) {
+        let (mut scrn, mut block, mut face) = self.level.kid_start();
+        if n == 3 && self.milestone {
+            // past the first gate: start just inside it, loose floor gone
+            face = 0xff;
+            scrn = 2;
+            block = 6;
+            let i = Level::index(7, 4, 0);
+            self.level.set_type(i, crate::level::obj::SPACE);
+        }
         let mut k = Char { scrn, ..Char::default() };
         k.block_x = block % 10;
         k.block_y = block / 10;
         k.x = getblockej(k.block_x as i8).wrapping_add(ANGLE + 7);
         k.face = face ^ 0xff;
-        k.life = ALIVE;
-        self.kid = k;
-        self.vis_scrn = scrn;
-        self.sn_last = [0xff; 10];
-        self.sn_this = [0xff; 10];
-        self.block_y_last = k.block_y;
+        self.ch = k;
+        self.kid_strength = self.max_strength;
 
         match n {
             1 => {
@@ -298,16 +392,26 @@ impl Game {
             _ => self.jumpseq(s::TURN),
         }
         // STARTKID1
-        let by = self.kid.block_y as i8;
-        self.kid.y = FLOOR_Y[(by + 1) as usize];
-        self.kid.xvel = 0;
-        self.kid.yvel = 0;
-        self.kid.sword = 0;
+        let by = self.ch.block_y as i8;
+        self.ch.y = FLOOR_Y[(by + 1) as usize];
+        self.ch.life = ALIVE;
+        self.ch.id = 0;
+        self.ch.xvel = 0;
+        self.ch.yvel = 0;
         self.weightless = 0;
         self.jarabove = 0;
+        self.droppedout = false;
+        self.ch.sword = 0;
+        self.offguard = false;
         self.animchar();
-        self.trigger_screen_objects();
-        self.show_message(format!("LEVEL {n}"), 3 * FPS);
+        // Level 7 (weightless): the kid falls into screen 17 from above
+        if n == 7 && self.ch.scrn == 17 {
+            self.cut(3);
+        }
+        self.sn_last = [0xff; 10];
+        self.sn_this = [0xff; 10];
+        self.block_y_last = self.ch.block_y;
+        self.save_kid();
     }
 
     pub fn show_message(&mut self, s: String, frames: u32) {
@@ -318,10 +422,16 @@ impl Game {
         self.frames_left.div_ceil(60 * FPS)
     }
 
-    /// One frame (TOPCTRL.S NextFrame), `c` is this frame's raw input.
+    /// One frame (TOPCTRL.S MainLoop and NextFrame), `c` is this frame's
+    /// raw input.
     pub fn tick(&mut self, c: Controls) {
         self.ticks += 1;
         self.sounds.clear();
+        self.chg_kid_str = 0;
+        self.chg_opp_str = 0;
+        if self.lightning > 0 {
+            self.lightning -= 1;
+        }
         if let Some((_, t)) = &mut self.message {
             *t = t.saturating_sub(1);
             if *t == 0 {
@@ -345,10 +455,21 @@ impl Game {
             Phase::TimeUp | Phase::Won => return,
             _ => {}
         }
+        self.misctimers();
         self.animmobs();
         self.animtrans();
+        self.bonesrise();
+        self.checkalert();
         self.dokid(c);
-        self.cutcheck();
+        self.doshad();
+        self.checkstrike();
+        self.checkstab();
+        self.addsfx();
+        self.chgmeters();
+        if let Some(scrn) = self.cutcheck() {
+            self.prepcut(scrn);
+        }
+        self.cutguard();
 
         if self.next_level {
             self.next_level = false;
@@ -361,7 +482,12 @@ impl Game {
             self.phase = Phase::LevelDone(1);
             return;
         }
-        if self.level.number < 13 || (self.level.number == 13 && !self.exitopen) {
+        // Level 12: leaving screen 23 goes straight on to level 13
+        if self.level.number == 12 && self.kid.scrn == 23 {
+            self.phase = Phase::LevelDone(0);
+            return;
+        }
+        if self.level.number < 13 || (self.level.number == 13 && self.exitopen == 0) {
             self.frames_left = self.frames_left.saturating_sub(1);
             if self.frames_left == 0 && self.level.number < 13 {
                 self.phase = Phase::TimeUp;
@@ -389,42 +515,167 @@ impl Game {
         self.frames_left = t;
     }
 
+    /// misctimers (TOPCTRL.S)
+    fn misctimers(&mut self) {
+        if self.mergetimer > 0 {
+            self.mergetimer -= 1;
+            if self.mergetimer == 0 {
+                self.mergetimer = -1;
+            }
+        }
+        // Level 8: wait on screen 16 long enough once the exit is open,
+        // and the mouse comes to open the gate
+        if self.level.number == 8 && self.kid.scrn == 16 && self.exitopen != 0 {
+            if self.exitopen == MOUSETIMER {
+                self.mouserescue();
+                self.exitopen += 1;
+            } else if self.exitopen < MOUSETIMER {
+                self.exitopen += 1;
+            }
+        }
+    }
+
     /// DoKid (TOPCTRL.S)
     fn dokid(&mut self, c: Controls) {
+        self.load_kid_wop();
         self.rereadblocks();
-        if self.kid.scrn == 0 {
-            // kill0: fell off the map
-            self.kid.life = 0;
-        }
+        self.unholy();
+        self.kill0();
         self.playerctrl(c);
+        if self.inverted && self.ch.life & 0x80 == 0 {
+            // the screen flips back the right way up when you die
+            self.inverted = false;
+        }
         if self.weightless != 0 {
             self.weightless -= 1;
         }
-        if self.kid.scrn == 0 {
-            return;
+        if self.ch.scrn != 0 {
+            self.animchar();
+            self.gravity();
+            self.addfall();
+            self.setupchar();
+            self.rereadblocks();
+            self.getedges();
+            self.firstguard();
+            let (cl, cr) = self.checkbarr();
+            self.collisions(cl, cr);
+            self.checkgate();
+            self.checkfloor();
+            self.checkpress();
+            self.checkspikes();
+            self.checkimpale();
+            self.shakeloose();
         }
-        self.animchar();
-        self.gravity();
-        self.addfall();
-        self.setupchar();
-        self.rereadblocks();
-        self.getedges();
-        let (cl, cr) = self.checkbarr();
-        self.collisions(cl, cr);
-        self.checkfloor();
-        self.checkpress();
-        self.checkspikes();
-        self.checkimpale();
-        self.shakeloose();
+        self.save_kid();
     }
 
-    /// CUTCHECK / cutchar / CUT (AUTO.S): follow the kid off the edge.
-    fn cutcheck(&mut self) {
+    /// kill0: on the null screen (fell off the map) the kid dies.
+    fn kill0(&mut self) {
+        if self.ch.life & 0x80 == 0 || self.ch.scrn != 0 {
+            return;
+        }
+        self.add_sound(Sound::Splat);
+        self.decstr(100);
+        self.ch.life = 0;
+        self.ch.posn = 185;
+    }
+
+    /// CUTCHECK / cutchar (AUTO.S): follow the kid off the edge, and take
+    /// an en garde guard along or leave him where he is. Returns the
+    /// screen to cut to.
+    fn cutcheck(&mut self) -> Option<u8> {
+        if self.cuttimer != 0 {
+            self.cuttimer -= 1;
+            return None;
+        }
+        self.load_kid();
         self.setupchar();
         self.getedges();
-        let Some(dir) = self.cutchar() else { return };
+        let dir = self.cutchar()?;
+        match dir {
+            0 => self.milestone3(),
+            1 => self.stealsword(),
+            _ => {}
+        }
+        self.cut(dir);
+        self.save_kid();
+        log::debug!("cut {dir} to screen {}", self.kid.scrn);
+        if self.shad.face != crate::guard::NO_CHAR {
+            self.cutguards(dir);
+        }
+        Some(self.kid.scrn)
+    }
+
+    /// PrepCut: show screen `scrn` and wake up what is on it.
+    fn prepcut(&mut self, scrn: u8) {
+        if scrn == 0 || scrn == self.vis_scrn {
+            return;
+        }
+        self.vis_scrn = scrn;
+        // drawbg: at least two frames before the next cut
+        self.cuttimer = 2;
+        if self.level.number == 14 && scrn == 5 {
+            // the princess's room
+            self.phase = Phase::Won;
+            log::info!("reached the princess");
+            return;
+        }
+        self.load_kid();
+        self.trigger_screen_objects();
+        self.addguard();
+    }
+
+    fn cutchar(&mut self) -> Option<u8> {
+        const TOP_PL: u8 = 10;
+        const TOP_MI: u8 = (-16i8) as u8;
+        const BOT: u8 = BOT_CUT_EDGE;
+        let y = self.ch.y;
+        let falling = matches!(self.ch.action, 5 | 4 | 3);
+        if !falling && (y < TOP_PL || y >= TOP_MI) {
+            return Some(2);
+        }
+        if y >= BOT {
+            if self.level.number == 6 && self.ch.scrn == 1 {
+                return None;
+            }
+            return Some(3);
+        }
+        let p = self.ch.posn;
+        if (135..150).contains(&p) || (110..120).contains(&p) || (150..163).contains(&p) || (166..169).contains(&p) {
+            return None;
+        }
+        if self.ch.action == 7 {
+            return None;
+        }
+        const LEFT_CUT: u8 = SCRN_LEFT - 4;
+        const RIGHT_CUT: u8 = SCRN_LEFT + 140 - 1 + 4;
+        if self.ch.face & 0x80 != 0 {
+            let l = self.edges.left;
+            if l <= LEFT_CUT {
+                return Some(0);
+            }
+            if l >= SCRN_LEFT + 140 {
+                return Some(1);
+            }
+            return None;
+        }
+        let (s, by) = (self.ch.scrn, self.ch.block_y as i8 as i32);
+        let id = self.rdblock(s, 9, by);
+        let panel = matches!(id, crate::level::obj::PANELWIF | crate::level::obj::PANELWOF);
+        if !panel && self.edges.right >= RIGHT_CUT {
+            return Some(1);
+        }
+        if self.edges.right <= SCRN_LEFT - 1 {
+            return Some(0);
+        }
+        None
+    }
+
+    /// CUT: move Char to the screen in direction `dir` (0 left, 1 right,
+    /// 2 up, 3 down).
+    pub fn cut(&mut self, dir: u8) {
         let l = &self.level;
-        let k = &mut self.kid;
+        let k = &mut self.ch;
         match dir {
             0 => {
                 k.scrn = l.left(k.scrn);
@@ -445,62 +696,58 @@ impl Game {
                 k.y = k.y.wrapping_sub(189);
             }
         }
-        log::debug!("cut {dir} to screen {}", self.kid.scrn);
-        if self.kid.scrn != 0 {
-            self.vis_scrn = self.kid.scrn;
-            self.trigger_screen_objects();
+    }
+
+    /// milestone3: on level 3, passing the first gate moves the restart point.
+    fn milestone3(&mut self) {
+        if self.level.number == 3 && self.ch.scrn == 7 && !self.milestone {
+            self.milestone = true;
+            log::info!("level 3 milestone");
         }
     }
 
-    fn cutchar(&mut self) -> Option<u8> {
-        const TOP_PL: u8 = 10;
-        const TOP_MI: u8 = (-16i8) as u8;
-        const BOT: u8 = 191 + 24;
-        let y = self.kid.y;
-        let falling = matches!(self.kid.action, 5 | 4 | 3);
-        if !falling && (y < TOP_PL || y >= TOP_MI) {
-            return Some(2);
+    /// stealsword: on level 12 the sword is gone once you reach the screen
+    /// below where it lay (the shadow has it).
+    fn stealsword(&mut self) {
+        if self.level.number == 12 && self.ch.scrn == 18 {
+            let i = Level::index(crate::guard::SWORDSCRN, 1, 0);
+            self.level.set_type(i, crate::level::obj::FLOOR);
         }
-        if y >= BOT {
-            if self.level.number == 6 && self.kid.scrn == 1 {
-                return None;
-            }
-            return Some(3);
-        }
-        let p = self.kid.posn;
-        if (135..150).contains(&p) || (110..120).contains(&p) || (150..163).contains(&p) || (166..169).contains(&p) {
-            return None;
-        }
-        if self.kid.action == 7 {
-            return None;
-        }
-        const LEFT_CUT: u8 = SCRN_LEFT - 4;
-        const RIGHT_CUT: u8 = SCRN_LEFT + 140 - 1 + 4;
-        if self.kid.face & 0x80 != 0 {
-            let l = self.edges.left;
-            if l <= LEFT_CUT {
-                return Some(0);
-            }
-            if l >= SCRN_LEFT + 140 {
-                return Some(1);
-            }
-            return None;
-        }
-        let (s, by) = (self.kid.scrn, self.kid.block_y as i8 as i32);
-        let id = self.rdblock(s, 9, by);
-        let panel = matches!(id, crate::level::obj::PANELWIF | crate::level::obj::PANELWOF);
-        if !panel && self.edges.right >= RIGHT_CUT {
-            return Some(1);
-        }
-        if self.edges.right <= SCRN_LEFT - 1 {
-            return Some(0);
-        }
-        None
     }
 
     /// JUMPSEQ
     pub fn jumpseq(&mut self, n: u8) {
-        self.kid.seq = seq::start(n);
+        self.ch.seq = seq::start(n);
+    }
+
+    // CTRLSUBS.S: load and save the character buffers
+    pub fn load_kid(&mut self) {
+        self.ch = self.kid;
+    }
+    pub fn save_kid(&mut self) {
+        self.kid = self.ch;
+    }
+    pub fn load_shad(&mut self) {
+        self.ch = self.shad;
+    }
+    pub fn save_shad(&mut self) {
+        self.shad = self.ch;
+    }
+    pub fn load_kid_wop(&mut self) {
+        self.ch = self.kid;
+        self.op = self.shad;
+    }
+    pub fn save_kid_wop(&mut self) {
+        self.kid = self.ch;
+        self.shad = self.op;
+    }
+    pub fn load_shad_wop(&mut self) {
+        self.ch = self.shad;
+        self.op = self.kid;
+    }
+    pub fn save_shad_wop(&mut self) {
+        self.shad = self.ch;
+        self.kid = self.op;
     }
 }
 
@@ -546,17 +793,19 @@ mod exit_tests {
 
     /// Stand the kid on block (bx, by) of `scrn`, facing `face`.
     fn place(g: &mut Game, scrn: u8, bx: u8, by: u8, face: u8) {
-        g.kid.scrn = scrn;
+        g.load_kid();
+        g.ch.scrn = scrn;
         g.vis_scrn = scrn;
-        g.kid.block_x = bx;
-        g.kid.block_y = by;
-        g.kid.face = face;
-        g.kid.x = getblockej(bx as i8).wrapping_add(ANGLE + 7);
-        g.kid.y = FLOOR_Y[by as usize + 1];
-        g.kid.action = 0;
-        g.kid.yvel = 0;
+        g.ch.block_x = bx;
+        g.ch.block_y = by;
+        g.ch.face = face;
+        g.ch.x = getblockej(bx as i8).wrapping_add(ANGLE + 7);
+        g.ch.y = FLOOR_Y[by as usize + 1];
+        g.ch.action = 0;
+        g.ch.yvel = 0;
         g.jumpseq(crate::seq::seq::STAND);
         g.animchar();
+        g.save_kid();
         g.message = None;
     }
 

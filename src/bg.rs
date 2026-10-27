@@ -298,7 +298,8 @@ pub fn draw(scr: &mut Screen, g: &Game) {
         draw_mob(&mut p, g, m);
     }
 
-    // the kid
+    // the shadowman or guard, then the kid (TOPCTRL.S addchars)
+    draw_shad(p.scr, g);
     draw_kid(p.scr, g);
 
     // floorpieces in front of a hanging/climbing kid
@@ -651,12 +652,95 @@ fn draw_kid(scr: &mut Screen, g: &Game) {
     if g.kid.scrn != g.vis_scrn || g.kid.scrn == 0 {
         return;
     }
-    let mut g2 = GameView::from(g);
-    g2.setup();
-    let f = g2.fchar;
-    let Some(img) = apple::chtable(f.table).and_then(|t| t.get(f.image)) else { return };
+    let (f, frame) = setupchar(&g.kid);
+    lay_char(scr, g, &f, 0, Op::Mask, Ink::Kid);
+    if g.chg_kid_str & 0x80 != 0 {
+        draw_comix(scr, g, &g.kid, &f);
+    }
+    draw_sword(scr, g, &g.kid, &f, &frame);
+}
+
+/// The opponent: a guard is drawn normally (shifted a pixel for the other
+/// uniform colour, GAMEBG.S DrawShifted), the shadowman EORed.
+fn draw_shad(scr: &mut Screen, g: &Game) {
+    let c = &g.shad;
+    if c.face == crate::guard::NO_CHAR || c.scrn != g.vis_scrn {
+        return;
+    }
+    let (f, frame) = setupchar(c);
+    if c.id == 1 {
+        lay_char(scr, g, &f, 0, Op::Eor, Ink::Guard);
+    } else {
+        let shift = if c.id == 24 { 0 } else { g.guard_color as i32 & 1 };
+        lay_char(scr, g, &f, shift, Op::Mask, Ink::Guard);
+    }
+    if g.chg_opp_str & 0x80 != 0 {
+        draw_comix(scr, g, c, &f);
+    }
+    draw_sword(scr, g, c, &f, &frame);
+}
+
+fn lay_char(scr: &mut Screen, g: &Game, f: &FChar, shift: i32, op: Op, ink: Ink) {
+    let Some(img) = apple::chtable(f.table, g.level.number).and_then(|t| t.get(f.image)) else { return };
     let mirror = f.face & 0x80 == 0;
-    scr.lay(&img, f.x, f.y as i32, mirror, Op::Mask, Ink::Kid);
+    scr.lay(&img, f.x + shift, f.y as i32, mirror, op, ink);
+}
+
+/// ADDFCHARX: FCharX + `a` in the direction the image faces.
+fn addfcharx(f: &FChar, a: u8) -> i32 {
+    let a = a as i8 as i32;
+    if f.face & 0x80 != 0 {
+        f.x - a
+    } else {
+        f.x + a
+    }
+}
+
+/// SETUPSWORD: the sword in the character's hand, when it shows.
+fn draw_sword(scr: &mut Screen, g: &Game, c: &Char, f: &FChar, frame: &crate::seq::Frame) {
+    let shows = (c.id == 2 && c.life & 0x80 != 0) || (229..238).contains(&c.posn) || c.sword != 0;
+    if !shows {
+        return;
+    }
+    let n = frame.sword & 0x3f;
+    if n == 0 {
+        return;
+    }
+    let (image, dx, dy) = crate::seq::sword(n);
+    if image == 0 {
+        return;
+    }
+    let sf = FChar { x: addfcharx(f, dx), y: f.y.wrapping_add(dy), face: f.face, image, table: 2 };
+    lay_char(scr, g, &sf, 0, Op::Mask, Ink::Sword);
+}
+
+/// SETUPCOMIX: the impact star on a character who has just been hurt.
+fn draw_comix(scr: &mut Screen, g: &Game, c: &Char, f: &FChar) {
+    const STARIMAGE: u8 = 0x41;
+    let mut sf = *f;
+    match c.posn {
+        178 => return,
+        177 => {
+            sf.x = addfcharx(&sf, (-5i8) as u8);
+        }
+        185 | 106..=110 => {
+            sf.y = sf.y.wrapping_add(4);
+            sf.x = addfcharx(&sf, 5);
+        }
+        _ => {
+            let dy: i8 = if c.id == 0 { -15 } else { -11 };
+            sf.y = sf.y.wrapping_add(dy as u8);
+            sf.x = addfcharx(&sf, 5);
+        }
+    }
+    // colour by pixel parity: kid red, opponents blue
+    let who = if c.id == 0 { 0 } else { 1 };
+    if (who ^ sf.x ^ (sf.face as i32)) & 1 == 0 {
+        sf.x += 1;
+    }
+    sf.image = STARIMAGE;
+    sf.table = 0;
+    lay_char(scr, g, &sf, 0, Op::Mask, Ink::Flame);
 }
 
 /// Floorpieces whose left lip overlaps a hanging or climbing kid get
@@ -681,30 +765,19 @@ fn redraw_floor_over_kid(p: &mut Painter, g: &Game, blocks: &[Blk]) {
     }
 }
 
-/// A read-only copy of what SETUPCHAR needs, so drawing never mutates Game.
-struct GameView {
-    kid: Char,
-    fchar: FChar,
-}
-
-impl GameView {
-    fn from(g: &Game) -> GameView {
-        GameView { kid: g.kid, fchar: g.fchar }
+/// SETUPCHAR for drawing, on a copy so drawing never mutates Game.
+fn setupchar(c: &Char) -> (FChar, crate::seq::Frame) {
+    let frame = crate::seq::frame(c.id, c.posn);
+    let (table, image) = crate::seq::decode_image(&frame);
+    let left = c.face & 0x80 != 0;
+    let x = if left { c.x.wrapping_sub(frame.dx) } else { c.x.wrapping_add(frame.dx) };
+    let a = x.wrapping_sub(SCRN_LEFT);
+    let mut px = a as i32 * 2;
+    if px >= 256 && (px & 0xff) >= 0xf0 {
+        px -= 512;
     }
-
-    fn setup(&mut self) {
-        let frame = crate::seq::kid_frame(self.kid.posn);
-        let (table, image) = crate::seq::decode_image(&frame);
-        let left = self.kid.face & 0x80 != 0;
-        let x = if left { self.kid.x.wrapping_sub(frame.dx) } else { self.kid.x.wrapping_add(frame.dx) };
-        let a = x.wrapping_sub(SCRN_LEFT);
-        let mut px = a as i32 * 2;
-        if px >= 256 && (px & 0xff) >= 0xf0 {
-            px -= 512;
-        }
-        if (frame.check ^ self.kid.face) & 0x80 == 0 {
-            px += 1;
-        }
-        self.fchar = FChar { x: px, y: frame.dy.wrapping_add(self.kid.y), face: self.kid.face, image, table };
+    if (frame.check ^ c.face) & 0x80 == 0 {
+        px += 1;
     }
+    (FChar { x: px, y: frame.dy.wrapping_add(c.y), face: c.face, image, table }, frame)
 }

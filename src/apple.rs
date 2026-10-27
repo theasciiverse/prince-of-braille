@@ -78,19 +78,34 @@ table!(CHTAB1, "IMG.CHTAB1");
 table!(CHTAB2, "IMG.CHTAB2");
 table!(CHTAB3, "IMG.CHTAB3");
 table!(CHTAB4_GD, "IMG.CHTAB4.GD");
+table!(CHTAB4_SKEL, "IMG.CHTAB4.SKEL");
+table!(CHTAB4_FAT, "IMG.CHTAB4.FAT");
+table!(CHTAB4_SHAD, "IMG.CHTAB4.SHAD");
+table!(CHTAB4_VIZ, "IMG.CHTAB4.VIZ");
 table!(CHTAB5, "IMG.CHTAB5");
 table!(BGTAB1_DUN, "IMG.BGTAB1.DUN");
 table!(BGTAB2_DUN, "IMG.BGTAB2.DUN");
 table!(BGTAB1_PAL, "IMG.BGTAB1.PAL");
 table!(BGTAB2_PAL, "IMG.BGTAB2.PAL");
 
-/// Character table by FCharTable number (0-7; GRAFIX.S chtablist).
-pub fn chtable(n: u8) -> Option<&'static ImageTable> {
+/// Character set loaded as chtable4 on each level (MISC.S chset). Sets 0
+/// and 2 are the same guard images, read from either side of the disk.
+const CHSET: [u8; 15] = [0, 0, 0, 1, 2, 2, 3, 2, 2, 2, 2, 2, 4, 5, 5];
+
+/// Character table by FCharTable number (0-7; GRAFIX.S chtablist) on
+/// level `level`, which decides what chtable4 holds.
+pub fn chtable(n: u8, level: u8) -> Option<&'static ImageTable> {
     match n {
         0 => Some(&CHTAB1),
         1 => Some(&CHTAB2),
         2 => Some(&CHTAB3),
-        3 => Some(&CHTAB4_GD),
+        3 => Some(match CHSET.get(level as usize).copied().unwrap_or(0) {
+            1 => &CHTAB4_SKEL,
+            3 => &CHTAB4_FAT,
+            4 => &CHTAB4_SHAD,
+            5 => &CHTAB4_VIZ,
+            _ => &CHTAB4_GD,
+        }),
         4 => Some(&CHTAB5),
         _ => None,
     }
@@ -107,6 +122,8 @@ pub enum Op {
     /// clear the image's silhouette widened by a pixel each side, then OR
     /// (MASKTAB in HRTABLES.S), which keeps a dark outline round characters
     Mask,
+    /// flip screen pixels under the image (the shadowman)
+    Eor,
 }
 
 /// What a pixel belongs to, for colouring. Order is draw priority within a cell.
@@ -121,7 +138,6 @@ pub enum Ink {
     Potion = 5,
     Sword = 6,
     Kid = 7,
-    #[allow(dead_code)] // guards are next
     Guard = 8,
 }
 
@@ -253,6 +269,18 @@ impl Screen {
                         self.set(sx(c), y, v, img.pal(c as usize, row));
                     }
                 }
+                Op::Eor => {
+                    for c in 0..wpx {
+                        if img.bit(c as usize, row) {
+                            let (px, py) = (sx(c), y);
+                            if (0..SCREEN_W).contains(&px) {
+                                let i = (py * SCREEN_W + px) as usize;
+                                let v = if self.px[i] == Ink::None { ink } else { Ink::None };
+                                self.set(px, py, v, img.pal(c as usize, row));
+                            }
+                        }
+                    }
+                }
                 Op::Mask => {
                     for c in 0..wpx {
                         let on = |k: i32| k >= 0 && k < wpx && img.bit(k as usize, row);
@@ -277,7 +305,7 @@ mod tests {
 
     #[test]
     fn every_table_parses() {
-        for t in [&CHTAB1, &CHTAB2, &CHTAB3, &CHTAB4_GD, &CHTAB5, &BGTAB1_DUN, &BGTAB2_DUN, &BGTAB1_PAL, &BGTAB2_PAL] {
+        for t in [&CHTAB1, &CHTAB2, &CHTAB3, &CHTAB4_GD, &CHTAB4_SKEL, &CHTAB4_FAT, &CHTAB4_SHAD, &CHTAB4_VIZ, &CHTAB5, &BGTAB1_DUN, &BGTAB2_DUN, &BGTAB1_PAL, &BGTAB2_PAL] {
             for n in 1..=t.count() {
                 assert!(t.get(n).is_some(), "image {n}");
             }

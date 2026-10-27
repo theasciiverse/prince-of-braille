@@ -326,10 +326,25 @@ pub fn paint_status(buf: &mut Buffer, area: Rect, g: &Game, note: &str) {
         let sx = area.x + area.width.saturating_sub(w) / 2;
         buf.set_string(sx, y, &m, text.add_modifier(Modifier::BOLD));
     }
+    // the opponent's meter at the right (GAMEBG.S DRAWOPPMETER): not for
+    // the mouse or the skeleton, and the shadow's only on level 12
+    let o = &g.shad;
+    let opp = g.opp_strength > 0 && o.id != 24 && o.id != 4 && (o.id != 1 || g.level.number == 12);
+    let mut rx = area.x + area.width;
+    if opp {
+        let blue = Style::default().fg(Color::Rgb(90, 150, 240)).bg(Color::Black);
+        for _ in 0..g.opp_strength {
+            rx = rx.saturating_sub(1);
+            if let Some(c) = buf.cell_mut((rx, y)) {
+                c.set_char('▲').set_style(blue);
+            }
+        }
+        rx = rx.saturating_sub(2);
+    }
     let right = format!("L{}  {} min  {}", g.level.number, g.minutes_left(), note);
     let w = right.chars().count() as u16;
-    if area.width > w {
-        buf.set_string(area.x + area.width - w, y, &right, text);
+    if rx > area.x + w {
+        buf.set_string(rx - w, y, &right, text);
     }
 }
 

@@ -45,7 +45,7 @@ impl Game {
         self.blockedge = getblockej(beg as i8).wrapping_add(ANGLE);
         let mut i = beg;
         while i < end {
-            let scrn = self.kid.scrn;
+            let scrn = self.ch.scrn;
             let lb = self.getleftbar(scrn, i, blocky);
             let mut cd = if lb < self.edges.cd_right { 0x0f } else { 0 };
             let rb = self.getrightbar(scrn, i, blocky);
@@ -96,10 +96,10 @@ impl Game {
 
     /// CHECKBARR: returns (collideL, collideR) block numbers.
     pub fn checkbarr(&mut self) -> (Option<usize>, Option<usize>) {
-        if self.kid.action == 7 {
+        if self.ch.action == 7 {
             return (None, None);
         }
-        let this = self.kid.block_y;
+        let this = self.ch.block_y;
         self.init_cd_bufs(this);
         self.block_y_last = this;
 
@@ -127,12 +127,12 @@ impl Game {
 
     /// COLLISIONS: act on what CHECKBARR found.
     pub fn collisions(&mut self, cl: Option<usize>, cr: Option<usize>) {
-        if matches!(self.kid.action, 2 | 6) || (135..149).contains(&self.kid.posn) {
+        if matches!(self.ch.action, 2 | 6) || (135..149).contains(&self.ch.posn) {
             return;
         }
         if let Some(x) = cl {
             // left edge of a barrier: only matters walking right
-            if self.kid.sword != 2 && self.face_left() {
+            if self.ch.sword != 2 && self.face_left() {
                 return;
             }
             if !self.checkcoll1(x) {
@@ -142,7 +142,7 @@ impl Game {
             let d = self.getleftbar(s, bx, by).wrapping_sub(self.edges.cd_right);
             self.collide(d, true);
         } else if let Some(x) = cr {
-            if self.kid.sword != 2 && !self.face_left() {
+            if self.ch.sword != 2 && !self.face_left() {
                 return;
             }
             if !self.checkcoll1(x) {
@@ -155,7 +155,7 @@ impl Game {
     }
 
     fn checkcoll1(&mut self, x: usize) -> bool {
-        let mut by = self.kid.block_y as i8 as i32;
+        let mut by = self.ch.block_y as i8 as i32;
         if by < 0 {
             by += 3;
         } else if by >= 3 {
@@ -167,7 +167,7 @@ impl Game {
     }
 
     /// CHECKCOLL: is the block in `rd` really in the way?
-    fn checkcoll(&mut self) -> bool {
+    pub fn checkcoll(&mut self) -> bool {
         match self.rd.id {
             obj::FLASK => return false,
             obj::GATE => {
@@ -182,7 +182,7 @@ impl Game {
             }
             obj::MIRROR => {
                 // passing through from the right takes a running jump
-                if self.kid.id == 0 && (39..44).contains(&self.kid.posn) && self.face_left() {
+                if self.ch.id == 0 && (39..44).contains(&self.ch.posn) && self.face_left() {
                     self.set_spec(86);
                     return false;
                 }
@@ -215,10 +215,10 @@ impl Game {
 
     /// COLLIDE: `left` is a collision with a barrier's left edge.
     fn collide(&mut self, d: u8, left: bool) {
-        if self.kid.life & 0x80 == 0 || self.kid.posn == 177 {
+        if self.ch.life & 0x80 == 0 || self.ch.posn == 177 {
             return;
         }
-        self.kid.x = self.kid.x.wrapping_add(d);
+        self.ch.x = self.ch.x.wrapping_add(d);
         let mut id = self.rdblock1();
         if left {
             if id == obj::BLOCK {
@@ -228,7 +228,7 @@ impl Game {
         } else if matches!(id, obj::PANELWOF | obj::PANELWIF | obj::BLOCK) {
             self.rd.bx += 1;
             if self.rd.scrn == 0 && self.rd.bx == 10 {
-                self.rd.scrn = self.kid.scrn;
+                self.rd.scrn = self.ch.scrn;
                 self.rd.bx = 0;
             }
             id = self.rdblock1();
@@ -241,9 +241,9 @@ impl Game {
     }
 
     fn airbump(&mut self) {
-        self.kid.x = self.addcharx((-4i8) as u8);
-        if self.kid.action == 4 {
-            self.kid.xvel = 0;
+        self.ch.x = self.addcharx((-4i8) as u8);
+        if self.ch.action == 4 {
+            self.ch.xvel = 0;
         } else {
             self.jumpseq(s::BUMPFALL);
             self.animchar();
@@ -253,27 +253,27 @@ impl Game {
     }
 
     fn groundbump(&mut self, left: bool) {
-        let fy = FLOOR_Y[(self.kid.block_y as i8 + 1).clamp(0, 4) as usize];
-        if self.kid.sword != 2 && fy.wrapping_sub(self.kid.y) >= 15 {
+        let fy = FLOOR_Y[(self.ch.block_y as i8 + 1).clamp(0, 4) as usize];
+        if self.ch.sword != 2 && fy.wrapping_sub(self.ch.y) >= 15 {
             self.airbump();
             return;
         }
-        self.kid.y = fy;
-        if self.kid.yvel >= OOF_VELOCITY {
-            self.kid.x = self.addcharx((-5i8) as u8);
+        self.ch.y = fy;
+        if self.ch.yvel >= OOF_VELOCITY {
+            self.ch.x = self.addcharx((-5i8) as u8);
             return;
         }
-        self.kid.yvel = 0;
-        if self.kid.life == 0 {
+        self.ch.yvel = 0;
+        if self.ch.life == 0 {
             return;
         }
-        if self.kid.sword == 2 {
+        if self.ch.sword == 2 {
             // collide en garde
             let collface = if left { FACE_LEFT } else { FACE_RIGHT };
-            if collface == self.kid.face {
+            if collface == self.ch.face {
                 self.jumpseq(s::BUMPENGBACK);
                 self.animchar();
-                self.kid.x = self.addcharx(1);
+                self.ch.x = self.addcharx(1);
             } else {
                 self.jumpseq(s::BUMPENGFWD);
                 self.animchar();
@@ -281,7 +281,7 @@ impl Game {
             }
             return;
         }
-        let p = self.kid.posn;
+        let p = self.ch.posn;
         let hard = p == 24 || p == 25 || (40..43).contains(&p) || (102..107).contains(&p);
         if hard {
             self.jumpseq(s::HARDBUMP);
@@ -292,6 +292,34 @@ impl Game {
         }
         self.alertguard = true;
         self.add_sound(Sound::SmackWall);
+    }
+
+    /// CHECKGATE: a closing gate knocks a character standing under it
+    /// to one side.
+    pub fn checkgate(&mut self) {
+        let p = self.ch.posn;
+        if !(self.ch.action == 7 || p == 15 || (108..111).contains(&p)) {
+            return;
+        }
+        if self.getunderft() != obj::GATE {
+            self.rd.bx -= 1;
+            if self.rdblock1() != obj::GATE {
+                return;
+            }
+        }
+        let x = self.rd.bx;
+        if !(0..10).contains(&x) || self.cd_this[x as usize] & self.cd_last[x as usize] != 0xff {
+            return;
+        }
+        if self.gate_open() {
+            return;
+        }
+        self.add_sound(Sound::SmackWall);
+        let coll_x = self.rd.bx;
+        self.getunderft();
+        let d: u8 = if self.rd.bx > coll_x { 5 } else { (-5i8) as u8 };
+        self.ch.x = self.ch.x.wrapping_add(d);
+        log::debug!("knocked aside by a closing gate");
     }
 
     /// GETFWDDIST: size of a careful step forward (0-14) and what's there
