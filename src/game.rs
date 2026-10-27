@@ -937,6 +937,29 @@ mod exit_tests {
     }
 
     #[test]
+    fn level_7_drop_in_is_survived_by_grabbing_the_ledge() {
+        // STARTKID drops the kid into screen 1 from screen 17; the shaft
+        // under him falls to screen 3, the floor to his left is one storey
+        // down. Holding the button through the drop catches that ledge.
+        let mut g = Game::new(7);
+        let btn = Controls { x: 0, y: 0, btn: true };
+        let climb = Controls { x: 0, y: -1, btn: true };
+        for _ in 0..20 {
+            g.tick(btn);
+        }
+        assert_eq!((g.kid.scrn, g.kid.action), (1, 6), "hanging on the ledge");
+        for _ in 0..20 {
+            g.tick(climb);
+        }
+        for _ in 0..30 {
+            g.tick(Controls::default());
+        }
+        assert!(g.kid.life & 0x80 != 0);
+        assert_eq!((g.kid.scrn, g.kid.block_y, g.kid.posn), (1, 0, 15), "standing on screen 1");
+        assert_eq!(g.kid_strength, g.max_strength);
+    }
+
+    #[test]
     fn a_closed_exit_does_not_let_you_climb() {
         let mut g = Game::new(1);
         place(&mut g, 9, 3, 1, FACE_LEFT);

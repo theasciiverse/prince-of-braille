@@ -184,11 +184,17 @@ blocks, stabs, deaths); the 500 ms debug snapshot includes the opponent.
   music yet, so he draws as soon as he sees you.
 - RND here is a xorshift, not the original generator: the same
   probabilities, a different sequence.
-- Level 7 starts with the kid dropped into screen 1 from the screen
-  above (STARTKID's cut). In the port he falls down the shaft at column 2
-  and dies on screen 3; column 1 has floor one storey down, so the
-  original probably lands him there. Not yet found where the port's fall
-  differs by those few pixels: play-test this.
+- Level 7 starts with the kid dropped into screen 1 from screen 17
+  (STARTKID's cut, y = -8, block row -1). Traced through the source
+  step by step (turn sequence, onground on frame 46, stepfall, freefall
+  with setfall 1,15), his base x is 93 as he passes the row 0 floor
+  plane: the first pixel of column 2, the open shaft (BlockTable puts
+  pixel 86 after the angle in block 2), one pixel short of the floor in
+  column 1. Falling on, he reaches terminal velocity and dies on screen
+  3. Holding the button through the drop catches the column 1 ledge
+  (fallon), and up climbs onto it; the port does the same as the
+  source here, so it is left as the source has it. Worth checking
+  against a real Apple II or an emulator.
 
 **The shadow, the mirror and slicers** (2026-10-28): the kid's
 reflection shows in the level 4 mirror (cropped to it, MISC.S
