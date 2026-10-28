@@ -101,8 +101,6 @@ pub struct Audio {
     pub muted: bool,
     /// the music track, so a song can be stopped
     music: Option<Player>,
-    /// songs rendered so far
-    songs: Vec<(crate::sid::Song, SamplesBuffer)>,
 }
 
 impl Audio {
@@ -132,31 +130,22 @@ impl Audio {
             Vec::new()
         };
         let music = sink.as_ref().map(|s| Player::connect_new(s.mixer()));
-        Audio { sink, bank, muted, music, songs: Vec::new() }
-    }
-
-    /// Whether songs can be heard (a cue is otherwise forgotten).
-    pub fn music_on(&self) -> bool {
-        !self.muted && self.music.is_some()
+        Audio { sink, bank, muted, music }
     }
 
     /// Start `song`, ending whatever song was playing.
-    pub fn start_song(&mut self, song: crate::sid::Song) {
-        if !self.music_on() {
+    pub fn start_song(&mut self, song: crate::music::Song) {
+        if self.muted {
             return;
         }
-        let buf = match self.songs.iter().find(|(s, _)| *s == song) {
-            Some((_, b)) => b.clone(),
-            None => {
-                let b = SamplesBuffer::new(NonZero::new(1).unwrap(), NonZero::new(SR).unwrap(), crate::sid::render(song, SR));
-                self.songs.push((song, b.clone()));
-                b
+        let Some(m) = &self.music else { return };
+        match rodio::Decoder::try_from(std::io::Cursor::new(song.mp3())) {
+            Ok(d) => {
+                m.clear();
+                m.append(d);
+                m.play();
             }
-        };
-        if let Some(m) = &self.music {
-            m.clear();
-            m.append(buf);
-            m.play();
+            Err(e) => log::warn!("song {song:?}: {e}"),
         }
     }
 

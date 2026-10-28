@@ -2,14 +2,12 @@
 //! PlayCut0-8, the start positions startP0 ... startK7, the playback loop
 //! `play`) and the room's animations (pburn, pstars, pflow).
 //!
-//! With the music on, a song step plays the song (from the C64 port, see
-//! sid.rs) while only the room moves, as PlaySong's loop does; with it off
-//! it takes the original's "music off" path: PlaySongX and PlaySongI play
-//! their given number of silent frames, PlaySong none.
+//! A song step starts the song and plays on for the number of frames the
+//! original gave it with the music off.
 
 use crate::game::*;
 use crate::seq::seq;
-use crate::sid::Song as S;
+use crate::music::Song as S;
 
 /// GAMEEQ floorY in the princess's room
 pub const FLOOR_Y: u8 = 151;
@@ -31,8 +29,7 @@ pub enum After {
 enum Step {
     /// `play`: run this many frames
     Play(u32),
-    /// PlaySongX/PlaySongI/PlaySong: the song, or with the music off this
-    /// many silent frames of `play`
+    /// PlaySongX/PlaySongI/PlaySong: start the song, play on this many frames
     Song(S, u32),
     /// SPEED
     Speed(u8),
@@ -92,8 +89,6 @@ pub struct Cut {
     pub stars: [u8; 4],
     /// real time owed to the next frame, in ms
     acc: f32,
-    /// a song is playing: only the room moves
-    singing: bool,
     btn_was: bool,
 }
 
@@ -125,13 +120,13 @@ impl Game {
                 Play(6),
                 K(seq::VSTOP),
                 Play(4),
-                Song(S::Vizier, 12),
+                Song(S::Jaffar, 12),
                 Play(4),
                 K(seq::VAPPROACH),
                 Play(30),
                 K(seq::VSTOP),
                 Play(4),
-                Song(S::Buildup, 25),
+                Play(25),
                 K(seq::VRAISE),
                 Play(1),
                 P(seq::PBACK),
@@ -141,7 +136,7 @@ impl Game {
                 Speed(12),
                 Play(5),
                 Sand,
-                Song(S::Magic, 8),
+                Play(8),
                 Speed(7),
                 K(seq::VEXIT),
                 Play(17),
@@ -227,7 +222,6 @@ impl Game {
             torch: PTORCHSTATE,
             stars: [0; 4],
             acc: 0.0,
-            singing: false,
             btn_was: true,
         });
         self.phase = Phase::Cut;
@@ -252,7 +246,6 @@ impl Game {
         cut.btn_was = c.btn;
         if fresh {
             log::info!("princess cut {} skipped", cut.num);
-            self.song_stop = true;
             self.end_cut(cut.after);
             return;
         }
@@ -280,20 +273,10 @@ impl Game {
 
     fn cut_step(&mut self, cut: &mut Cut, step: Step) {
         match step {
-            Step::Play(n) => {
-                cut.singing = false;
+            Step::Play(n) => cut.count = n,
+            Step::Song(song, n) => {
+                self.cuesong(song);
                 cut.count = n;
-            }
-            Step::Song(s, n) => {
-                if self.music_on {
-                    let secs = crate::sid::seconds(s);
-                    cut.count = (secs * 1000.0 / frame_ms(cut.speed) as f64).ceil() as u32;
-                    cut.singing = true;
-                    self.song_start = Some(s);
-                } else {
-                    cut.singing = false;
-                    cut.count = n;
-                }
             }
             Step::Speed(s) => cut.speed = s,
             Step::P(n) => {
@@ -407,14 +390,12 @@ impl Game {
     /// room's own animation (pburn twice, pstars, pflow).
     fn cut_frame(&mut self, cut: &mut Cut) {
         self.rnd();
-        if cut.singing {
-            // PlaySong: only the torches, stars and sand move
-        } else if self.kid.posn != 0 {
+        if self.kid.posn != 0 {
             self.load_kid();
             self.animchar();
             self.save_kid();
         }
-        if !cut.singing && self.shad.posn != 0 {
+        if self.shad.posn != 0 {
             self.load_shad_wop();
             self.animchar();
             self.save_shad_wop();
@@ -455,7 +436,7 @@ impl Game {
             After::NewGame => {
                 self.start_level(1, false);
                 // StartGame: the danger theme on level 1
-                self.cuesong(crate::sid::Song::Danger, 25);
+                self.cuesong(crate::music::Song::Danger);
             }
             After::TimeUp => {
                 self.phase = Phase::TimeUp;

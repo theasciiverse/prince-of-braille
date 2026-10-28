@@ -320,7 +320,7 @@ impl Game {
         self.lightcolor = 0xff;
         self.lightning = 10;
         self.boostmeter();
-        self.cuesong(crate::sid::Song::Rejoin, 85);
+        self.cuesong(crate::music::Song::Prince);
         self.mergetimer = 42;
         self.ch.id = 0;
         self.save_kid();
@@ -762,10 +762,10 @@ impl Game {
     /// opens the exit.
     fn deadenemy(&mut self) {
         if self.level.number != 13 && self.ch.id != 1 {
-            self.cuesong(crate::sid::Song::Vict, 25);
+            self.cuesong(crate::music::Song::Victory);
         }
         if self.level.number == 13 {
-            self.cuesong(crate::sid::Song::Upstairs, 25);
+            self.cuesong(crate::music::Song::JaffarDead);
             self.lightcolor = 0xff;
             self.lightning = 10;
             self.exitopen = 1;
@@ -1069,7 +1069,7 @@ impl Game {
                     return self.addnormalgd();
                 }
                 if self.exitopen != 77 {
-                    self.cuesong(crate::sid::Song::Danger, 50);
+                    self.cuesong(crate::music::Song::Danger);
                     self.exitopen = 77;
                 }
                 self.csps(SHADPOS6A);
@@ -1142,6 +1142,11 @@ impl Game {
             self.guard_color,
             self.ch.life & 0x80 != 0
         );
+        // meeting Jaffar on level 13
+        if self.level.number == 13 && self.ch.life & 0x80 != 0 && !self.met_jaffar {
+            self.met_jaffar = true;
+            self.cuesong(crate::music::Song::MeetJaffar);
+        }
         self.save_shad();
     }
 

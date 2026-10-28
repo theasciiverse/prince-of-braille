@@ -583,7 +583,6 @@ impl Game {
         if *state >= EMAXVAL {
             *d = -1;
             self.add_sound(Sound::GateDown);
-            self.cuesong(crate::sid::Song::Stairs, 15);
             self.exitopen = 1;
             log::info!("exit open");
             self.mirappear();

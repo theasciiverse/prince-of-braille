@@ -1,26 +1,59 @@
-//! Song cues (SPECIALK.S CUESONG, TOPCTRL.S songcues and deathsong,
-//! AUTO.S mirrmusic). A cued song waits, for at most its count of frames,
-//! until nothing on the screen is moving; then the game stands still while
-//! it plays, only the torches burning, as on the Apple. With the music off
-//! a cue is simply forgotten, as the original's silent MPLAY did. Unlike
-//! the original, the button cuts a song short.
+//! Music: the DOS version's songs as MP3s (from PrinceJS, Unlicense),
+//! cued where the Apple code cued its songs. A cue starts the song at once
+//! over the game.
 
 use crate::game::*;
-use crate::level::obj;
-use crate::sid::Song;
 
-/// TOPCTRL.S static?: positions a song may freeze a character in.
-fn still(posn: u8) -> bool {
-    matches!(posn, 0 | 15 | 229 | 109 | 171 | 166 | 185 | 177 | 178)
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Song {
+    Princess,
+    Jaffar,
+    Heartbeat,
+    Danger,
+    Accident,
+    SmallPotion,
+    Victory,
+    Prince,
+    HeroicDeath,
+    BigPotion,
+    Shadow,
+    Float,
+    Timer,
+    Tragic,
+    MeetJaffar,
+    JaffarDead,
+    Embrace,
+}
+
+impl Song {
+    pub fn mp3(self) -> &'static [u8] {
+        match self {
+            Song::Princess => include_bytes!("../assets/music/03_Princess.mp3"),
+            Song::Jaffar => include_bytes!("../assets/music/04_Jaffar.mp3"),
+            Song::Heartbeat => include_bytes!("../assets/music/05_Heartbeat.mp3"),
+            Song::Danger => include_bytes!("../assets/music/06_Danger.mp3"),
+            Song::Accident => include_bytes!("../assets/music/07_Accident.mp3"),
+            Song::SmallPotion => include_bytes!("../assets/music/08_Potion_1.mp3"),
+            Song::Victory => include_bytes!("../assets/music/09_Victory.mp3"),
+            Song::Prince => include_bytes!("../assets/music/11_Prince.mp3"),
+            Song::HeroicDeath => include_bytes!("../assets/music/13_Heroic_Death.mp3"),
+            Song::BigPotion => include_bytes!("../assets/music/14_Potion_2.mp3"),
+            Song::Shadow => include_bytes!("../assets/music/15_The_Shadow.mp3"),
+            Song::Float => include_bytes!("../assets/music/16_Float.mp3"),
+            Song::Timer => include_bytes!("../assets/music/17_Timer.mp3"),
+            Song::Tragic => include_bytes!("../assets/music/18_Tragic_End.mp3"),
+            Song::MeetJaffar => include_bytes!("../assets/music/19_Jaffar_2.mp3"),
+            Song::JaffarDead => include_bytes!("../assets/music/20_Jaffar_Dead.mp3"),
+            Song::Embrace => include_bytes!("../assets/music/21_Embrace.mp3"),
+        }
+    }
 }
 
 impl Game {
-    /// CUESONG: song `s`, to be played within `count` frames.
-    pub fn cuesong(&mut self, s: Song, count: u8) {
-        if self.music_on {
-            log::info!("song cue {s:?}");
-            self.song_cue = Some((s, count));
-        }
+    /// CUESONG: play `s` (main hands it to the audio after this frame).
+    pub fn cuesong(&mut self, s: Song) {
+        log::info!("song {s:?}");
+        self.song_start = Some(s);
     }
 
     /// deathsong: what the kid's death sounds like.
@@ -28,83 +61,11 @@ impl Game {
         let s = if self.shad.id == 1 && self.shad.face != crate::guard::NO_CHAR {
             Song::Shadow
         } else if self.heroic {
-            Song::Heroic
+            Song::HeroicDeath
         } else {
-            Song::Accid
+            Song::Accident
         };
-        self.cuesong(s, 255);
-    }
-
-    /// songcues: start the cued song once the scene is still enough.
-    pub fn songcues(&mut self) {
-        let Some((s, count)) = self.song_cue else { return };
-        if count == 0 {
-            self.song_cue = None;
-            return;
-        }
-        self.song_cue = Some((s, count - 1));
-        // once the kid has reached the stairs, play only one song
-        if self.kid.posn == 0 && self.next_level {
-            return;
-        }
-        if !still(self.kid.posn) {
-            return;
-        }
-        let sh = &self.shad;
-        if sh.face != crate::guard::NO_CHAR && sh.scrn == self.vis_scrn && !still(sh.posn) {
-            return;
-        }
-        // nothing fast-moving that would look wrong frozen
-        let busy = self.trobs.iter().any(|t| {
-            t.scrn == self.vis_scrn
-                && t.loc < 30
-                && matches!(
-                    self.level.bluetype[crate::level::Level::index(t.scrn, (t.loc % 10) as i32, (t.loc / 10) as i32)]
-                        & 0x1f,
-                    obj::LOOSE | obj::SPIKES | obj::SLICER
-                )
-        });
-        if busy || !self.mobs.is_empty() || self.lightning != 0 {
-            return;
-        }
-        if self.mergetimer > 0 || self.chg_kid_str != 0 || self.chg_opp_str != 0 {
-            return;
-        }
-        let frames = (crate::sid::seconds(s) * FPS as f64).ceil() as u32;
-        log::info!("song {s:?} plays for {frames} frames");
-        self.song_cue = None;
-        self.song = Some((s, frames));
-        self.song_start = Some(s);
-    }
-
-    /// One frame while a song plays: only the torches burn. Returns false
-    /// once the song is over (or the button cut it short).
-    pub fn song_tick(&mut self, c: Controls) -> bool {
-        let Some((s, left)) = self.song else { return false };
-        if left == 0 || (c.btn && !self.song_btn) {
-            self.song = None;
-            self.song_stop = true;
-            return false;
-        }
-        self.song_btn = c.btn;
-        self.song = Some((s, left - 1));
-        self.burn();
-        true
-    }
-
-    /// BURN: the torches on the visible screen flicker on.
-    fn burn(&mut self) {
-        for k in 0..self.trobs.len() {
-            let t = self.trobs[k];
-            if t.scrn != self.vis_scrn || t.loc >= 30 || t.direc < 0 {
-                continue;
-            }
-            let i = crate::level::Level::index(t.scrn, (t.loc % 10) as i32, (t.loc / 10) as i32);
-            if self.level.bluetype[i] & 0x1f == obj::TORCH {
-                let st = self.level.bluespec[i];
-                self.level.bluespec[i] = self.flameframe(st);
-            }
-        }
+        self.cuesong(s);
     }
 
     /// mirrmusic (AUTO.S): on level 4, the danger theme as the kid heads
@@ -117,7 +78,7 @@ impl Game {
             && self.kid.block_y == 0
             && self.kid.scrn == MIRSCRN_R
         {
-            self.cuesong(Song::Danger, 50);
+            self.cuesong(Song::Danger);
             self.exitopen = 77;
         }
     }
@@ -126,37 +87,19 @@ impl Game {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rodio::Source;
 
     #[test]
-    fn a_cue_waits_for_stillness_and_then_freezes_the_game() {
-        let mut g = Game::new(2);
-        g.music_on = true;
-        for _ in 0..10 {
-            g.tick(Controls::default());
+    fn every_song_decodes() {
+        use Song::*;
+        for s in [
+            Princess, Jaffar, Heartbeat, Danger, Accident, SmallPotion, Victory, Prince, HeroicDeath, BigPotion,
+            Shadow, Float, Timer, Tragic, MeetJaffar, JaffarDead, Embrace,
+        ] {
+            let d = rodio::Decoder::try_from(std::io::Cursor::new(s.mp3())).expect("decodes");
+            let rate = d.sample_rate().get();
+            let n = d.take(rate as usize).count();
+            assert!(n > 1000, "{s:?}: {n} samples");
         }
-        g.cuesong(Song::Sword, 25);
-        g.tick(Controls::default());
-        let (s, frames) = g.song.expect("the kid stands still, so the song starts");
-        assert_eq!(s, Song::Sword);
-        assert_eq!(g.song_start, Some(Song::Sword));
-        let ticks = g.ticks;
-        let x = g.kid.x;
-        for _ in 0..5 {
-            g.tick(Controls { x: 1, ..Controls::default() });
-        }
-        assert_eq!(g.kid.x, x, "nothing moves while the song plays");
-        assert!(g.ticks > ticks);
-        for _ in 0..frames + 2 {
-            g.tick(Controls::default());
-        }
-        assert!(g.song.is_none());
-    }
-
-    #[test]
-    fn with_the_music_off_a_cue_is_forgotten() {
-        let mut g = Game::new(2);
-        g.cuesong(Song::Sword, 25);
-        g.tick(Controls::default());
-        assert!(g.song.is_none() && g.song_cue.is_none());
     }
 }

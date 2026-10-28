@@ -263,16 +263,10 @@ pub struct Game {
     pub message: Option<(String, u32)>,
     /// the princess's room scene being played
     pub cut: Option<crate::cut::Cut>,
-    /// music on (sound on and not muted): cues are played, not forgotten
-    pub music_on: bool,
-    /// SongCue and SongCount
-    pub song_cue: Option<(crate::sid::Song, u8)>,
-    /// the song playing and frames left; the game stands still meanwhile
-    pub song: Option<(crate::sid::Song, u32)>,
-    /// this frame: a song to start, or the playing one to stop
-    pub song_start: Option<crate::sid::Song>,
-    pub song_stop: bool,
-    pub song_btn: bool,
+    /// a song to start this frame
+    pub song_start: Option<crate::music::Song>,
+    /// level 13's meeting music has played
+    pub met_jaffar: bool,
     pub rng: u32,
     pub ticks: u64,
     /// last potion drunk (REMOVEOBJ lastpotion; 0xff = the sword)
@@ -353,12 +347,8 @@ impl Game {
             sounds: Vec::new(),
             message: None,
             cut: None,
-            music_on: false,
-            song_cue: None,
-            song: None,
             song_start: None,
-            song_stop: false,
-            song_btn: true,
+            met_jaffar: false,
             rng: 0x1234_5678,
             ticks: 0,
             potion: 0,
@@ -576,10 +566,6 @@ impl Game {
         self.ticks += 1;
         self.sounds.clear();
         self.song_start = None;
-        self.song_stop = false;
-        if self.song_tick(c) {
-            return;
-        }
         self.chg_kid_str = 0;
         self.chg_opp_str = 0;
         if self.lightning > 0 {
@@ -669,7 +655,6 @@ impl Game {
                 self.deathsong();
             }
         }
-        self.songcues();
     }
 
     /// Continue after death: restart the level, clock keeps running.
