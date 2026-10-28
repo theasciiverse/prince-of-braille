@@ -503,7 +503,7 @@ impl Game {
         }
     }
 
-    fn flameframe(&mut self, state: u8) -> u8 {
+    pub(crate) fn flameframe(&mut self, state: u8) -> u8 {
         let r = self.rnd();
         if r != state && r <= TORCH_LAST {
             return r;

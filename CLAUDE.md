@@ -153,7 +153,8 @@ Shift or Space = button (grab, careful step, pick up/drink). With the kitty
 keyboard protocol keys are exact (real releases, chords); elsewhere held
 keys are inferred from OS key repeat. `r` restart level, `n`/`b` next/prev
 level, `p` pause, `c` colour theme, `g` glyph mode, `f` scale, `m` or F8
-sound on/off (`--mute` starts without sound), Esc Esc quit.
+sound on/off (`--mute` starts without sound), Space skips a princess
+scene, Esc Esc quit.
 
 **Debugging:** `RUST_LOG=debug prince-of-braille 2>pob.log` logs every key,
 state changes and a 500 ms state snapshot. `--dump "R:12 .:6 U:1"` runs
@@ -227,16 +228,28 @@ start-up and played with rodio, as in the other Asciiverse games. The
 drink and upstairs events were music cues in the original and stay
 silent.
 
-**Not done yet:** princess and vizier cutscenes. The scripts (SUBS.S
-PlayCut0-8), their sequences (pstand, vapproach, ...), altset 2 and the
-princess and vizier images (IMG.CHTAB6.A/B, IMG.CHTAB7) are all in the
-released source, but the princess's room itself is a packed full-screen
-picture (MASTER.S `pacProom`, loaded by LoadStage2) that is not in the
-release, so the scenes cannot be drawn as the original drew them. Also
-not done: music (the song cues: danger, victory, death, Jaffar's
-theme, ...). Neither the music driver nor the songs are in the released
-source (MPLAY/MINIT only jump into a module that is not there), so music
-would have to be rebuilt by ear.
+**The princess's room** (2026-10-28): `src/cut.rs` plays SUBS.S's
+scenes (PlayCut0-8) on the game's own character buffers and animchar:
+the vizier turning the hourglass before a new game on level 1, the cuts
+before levels 2, 4, 6, 8, 9 and 12 (cut 5 turns ominous when the sand is
+almost out), the tragic ending when time runs out and the happy ending
+on reaching her. Start positions, sequences, SPEED changes and the
+hourglass's state from the time left are as in the source; Space skips a
+scene. `src/room.rs` draws the room: torch flames, twinkling stars, the
+hourglass and its sand, the big white post and the face masks from
+chtable6 at the original places. The room's picture itself (MASTER.S
+`pacProom`, loaded by LoadStage2) is not in the release, so the walls,
+floor, window, torch niches and doorway are our own stand-in laid out
+around those places. Frame pacing is an estimate: PAUSE is about 1.26 ms
+per unit of SPEED, the drawing time around it is a guess that makes the
+usual SPEED 12 run at the game's 12 frames a second. `POB_CUT=n` with
+`--dump` starts scene n for testing.
+
+**Not done yet:** music (the song cues: danger, victory, death,
+Jaffar's theme, ...). Neither the music driver nor the songs are in the
+released source (MPLAY/MINIT only jump into a module that is not there),
+so every song cue takes the original's music-off path, and the music
+would have to be transcribed from recordings of the Apple II game.
 
 **Clock** (2026-10-28): KEEPTIME, GETMINLEFT and SHOWTIME. It counts
 frames up, 725 to a minute (SPECIALK.S `min`), stops while the kid is

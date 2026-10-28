@@ -83,6 +83,9 @@ table!(CHTAB4_FAT, "IMG.CHTAB4.FAT");
 table!(CHTAB4_SHAD, "IMG.CHTAB4.SHAD");
 table!(CHTAB4_VIZ, "IMG.CHTAB4.VIZ");
 table!(CHTAB5, "IMG.CHTAB5");
+table!(CHTAB6_A, "IMG.CHTAB6.A");
+table!(CHTAB6_B, "IMG.CHTAB6.B");
+table!(CHTAB7, "IMG.CHTAB7");
 table!(BGTAB1_DUN, "IMG.BGTAB1.DUN");
 table!(BGTAB2_DUN, "IMG.BGTAB2.DUN");
 table!(BGTAB1_PAL, "IMG.BGTAB1.PAL");
@@ -107,6 +110,10 @@ pub fn chtable(n: u8, level: u8) -> Option<&'static ImageTable> {
             _ => &CHTAB4_GD,
         }),
         4 => Some(&CHTAB5),
+        // the princess's room (MASTER.S LoadStage2): disk side A holds
+        // levels 1 and 2, side B the rest, each with its own chtable6
+        5 => Some(if level < 3 { &CHTAB6_A } else { &CHTAB6_B }),
+        6 => Some(&CHTAB7),
         _ => None,
     }
 }
@@ -241,6 +248,11 @@ impl Screen {
     }
 
     #[inline]
+    /// Set one pixel (for pictures drawn here rather than from images).
+    pub fn plot(&mut self, x: i32, y: i32, v: Ink, pal: bool) {
+        self.set(x, y, v, pal);
+    }
+
     fn set(&mut self, x: i32, y: i32, v: Ink, pal: bool) {
         if (0..SCREEN_W).contains(&x) && (0..SCREEN_H).contains(&y) {
             let i = (y * SCREEN_W + x) as usize;
@@ -356,7 +368,7 @@ mod tests {
 
     #[test]
     fn every_table_parses() {
-        for t in [&CHTAB1, &CHTAB2, &CHTAB3, &CHTAB4_GD, &CHTAB4_SKEL, &CHTAB4_FAT, &CHTAB4_SHAD, &CHTAB4_VIZ, &CHTAB5, &BGTAB1_DUN, &BGTAB2_DUN, &BGTAB1_PAL, &BGTAB2_PAL] {
+        for t in [&CHTAB1, &CHTAB2, &CHTAB3, &CHTAB4_GD, &CHTAB4_SKEL, &CHTAB4_FAT, &CHTAB4_SHAD, &CHTAB4_VIZ, &CHTAB5, &CHTAB6_A, &CHTAB6_B, &CHTAB7, &BGTAB1_DUN, &BGTAB2_DUN, &BGTAB1_PAL, &BGTAB2_PAL] {
             for n in 1..=t.count() {
                 assert!(t.get(n).is_some(), "image {n}");
             }

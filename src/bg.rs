@@ -191,6 +191,10 @@ fn objid(g: &Game, scrn: u8, bx: i32, by: i32) -> (u8, u8) {
 
 /// Draw the visible screen, the kid and the front pieces.
 pub fn draw(scr: &mut Screen, g: &Game) {
+    if let Some(cut) = &g.cut {
+        crate::room::draw(scr, g, cut);
+        return;
+    }
     scr.clear();
     let palace = g.level.palace();
     let mut p = Painter {
@@ -1072,7 +1076,7 @@ fn comix(c: &Char, f: &FChar) -> Option<Obj> {
 }
 
 /// SETUPCHAR for drawing, on a copy so drawing never mutates Game.
-fn setupchar(c: &Char) -> (FChar, crate::seq::Frame) {
+pub(crate) fn setupchar(c: &Char) -> (FChar, crate::seq::Frame) {
     let frame = crate::seq::frame(c.id, c.posn);
     let (table, image) = crate::seq::decode_image(&frame);
     let left = c.face & 0x80 != 0;

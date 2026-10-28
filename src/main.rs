@@ -11,6 +11,7 @@
 
 mod apple;
 mod bg;
+mod cut;
 mod coll;
 mod ctrl;
 mod game;
@@ -19,6 +20,7 @@ mod input;
 mod level;
 mod mover;
 mod render;
+mod room;
 mod seq;
 mod sound;
 mod subs;
@@ -96,7 +98,7 @@ fn main() -> io::Result<()> {
 
 fn run(terminal: &mut DefaultTerminal, level: u8, exact: bool, theme: theme::Theme, mute: bool) -> io::Result<()> {
     let mut app = App {
-        game: Game::new(level),
+        game: new_game(level),
         screen: Screen::default(),
         glyphs: Glyphs::Hybrid,
         theme,
@@ -173,6 +175,10 @@ fn run(terminal: &mut DefaultTerminal, level: u8, exact: bool, theme: theme::The
 /// text after every token. A token starting with `=` just prints.
 fn dump_frames(level: u8, script: &str, theme: theme::Theme) {
     let mut g = Game::new(level);
+    // POB_CUT=n: start with princess scene n (as before entering `level`)
+    if let Some(n) = std::env::var("POB_CUT").ok().and_then(|v| v.parse().ok()) {
+        g.playcut(n, level, cut::After::Level(level));
+    }
     if let Some(at) = std::env::var("POB_AT").ok().and_then(|v| parse_at(&v)) {
         g.place_kid(at.0, at.1, at.2, at.3);
     }
@@ -207,7 +213,7 @@ fn dump_frames(level: u8, script: &str, theme: theme::Theme) {
             let _ = std::fs::write(format!("{dir}/{:03}.ppm", g.ticks), out);
         }
         let mut buf = ratatui::buffer::Buffer::empty(Rect::new(0, 0, w, h + 1));
-        render::paint_screen(&mut buf, Rect::new(0, 0, w, h), &scr, 1, Glyphs::Hybrid, theme, g.level.palace());
+        render::paint_screen(&mut buf, Rect::new(0, 0, w, h), &scr, 1, Glyphs::Hybrid, theme, g.level.palace() || g.cut.is_some());
         render::paint_status(&mut buf, Rect::new(0, h, w, 1), &g, "");
         let k = &g.kid;
         println!(
@@ -256,6 +262,16 @@ fn parse_at(v: &str) -> Option<(u8, u8, u8, u8)> {
     Some((n(0)?, n(1)?, n(2)?, face))
 }
 
+/// A new game: on level 1 it opens, as the original's attract mode did,
+/// with the vizier turning the hourglass in the princess's room.
+fn new_game(level: u8) -> Game {
+    let mut g = Game::new(level);
+    if level == 1 {
+        g.playcut(0, 1, cut::After::NewGame);
+    }
+    g
+}
+
 fn handle(app: &mut App, cmd: Cmd) {
     log::info!("cmd {cmd:?}");
     if app.confirm_quit {
@@ -276,7 +292,7 @@ fn handle(app: &mut App, cmd: Cmd) {
         }
         Cmd::RestartLevel => {
             if g.phase == Phase::TimeUp || g.phase == Phase::Won {
-                *g = Game::new(1);
+                *g = new_game(1);
             } else {
                 g.restart_level();
             }
@@ -340,7 +356,7 @@ fn draw(f: &mut ratatui::Frame, app: &mut App, input: &Input) {
     bg::draw(&mut app.screen, &app.game);
     let ox = area.x + (area.width - w) / 2;
     let oy = area.y + (area.height - h - 1) / 2;
-    render::paint_screen(buf, Rect::new(ox, oy, w, h), &app.screen, scale, app.glyphs, app.theme, app.game.level.palace());
+    render::paint_screen(buf, Rect::new(ox, oy, w, h), &app.screen, scale, app.glyphs, app.theme, app.game.level.palace() || app.game.cut.is_some());
     if let Some(c) = app.game.flash() {
         render::paint_flash(buf, Rect::new(ox, oy, w, h), c);
     }

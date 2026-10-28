@@ -335,6 +335,7 @@ pub fn paint_status(buf: &mut Buffer, area: Rect, g: &Game, note: &str) {
         Phase::Dead(_) if g.dead_frames > 24 => Some("Press SPACE to continue".to_string()),
         Phase::TimeUp => Some("TIME HAS EXPIRED  (R restarts, Esc quits)".to_string()),
         Phase::Won => Some("YOU WIN".to_string()),
+        Phase::Cut => Some("Space skips".to_string()),
         _ => g.message.as_ref().map(|(s, _)| s.clone()),
     };
     if let Some(m) = msg {

@@ -168,6 +168,8 @@ pub enum Phase {
     LevelDone(u8),
     TimeUp,
     Won,
+    /// a scene in the princess's room (`cut`)
+    Cut,
 }
 
 pub struct Game {
@@ -259,6 +261,8 @@ pub struct Game {
     pub next_level: bool,
     pub sounds: Vec<Sound>,
     pub message: Option<(String, u32)>,
+    /// the princess's room scene being played
+    pub cut: Option<crate::cut::Cut>,
     pub rng: u32,
     pub ticks: u64,
     /// last potion drunk (REMOVEOBJ lastpotion; 0xff = the sword)
@@ -338,6 +342,7 @@ impl Game {
             next_level: false,
             sounds: Vec::new(),
             message: None,
+            cut: None,
             rng: 0x1234_5678,
             ticks: 0,
             potion: 0,
@@ -571,6 +576,9 @@ impl Game {
                     let next = self.level.number + 1;
                     if next >= crate::level::NUM_LEVELS {
                         self.phase = Phase::Won;
+                    } else if let Some(n) = crate::cut::cut_before(next) {
+                        // a princess cut before certain levels
+                        self.playcut(n, next, crate::cut::After::Level(next));
                     } else {
                         self.start_level(next, true);
                         // LoadNextLevel: show the time left
@@ -584,6 +592,7 @@ impl Game {
                 return;
             }
             Phase::TimeUp | Phase::Won => return,
+            Phase::Cut => return self.cut_tick(c),
             _ => {}
         }
         self.misctimers();
@@ -626,9 +635,10 @@ impl Game {
         self.showtime();
         // You have one chance to finish level 13 after time runs out
         if self.level.number < 13 && self.frame_count >= TIMETABLE[TIMETABLE.len() - 1] {
-            self.phase = Phase::TimeUp;
-            self.show_message("TIME HAS EXPIRED".into(), u32::MAX);
+            // YouLose: the tragic ending
             log::info!("time up");
+            self.playcut(6, self.level.number, crate::cut::After::TimeUp);
+            return;
         }
         if self.kid.life & 0x80 == 0 {
             self.dead_frames += 1;
@@ -810,9 +820,9 @@ impl Game {
         // drawbg: at least two frames before the next cut
         self.cuttimer = 2;
         if self.level.number == 14 && scrn == 5 {
-            // the princess's room
-            self.phase = Phase::Won;
+            // the princess's room: YouWin, the happy ending
             log::info!("reached the princess");
+            self.playcut(7, 14, crate::cut::After::Won);
             return;
         }
         self.load_kid();
@@ -1004,11 +1014,12 @@ mod exit_tests {
         }
         for _ in 0..80 {
             g.tick(Controls { x: 0, y: -1, btn: false });
-            if g.level.number == 2 {
+            if g.phase == Phase::Cut {
                 break;
             }
         }
-        g.level.number
+        // the princess's room comes between levels 1 and 2
+        g.cut.as_ref().map_or(g.level.number, |c| c.level)
     }
 
     #[test]
@@ -1124,6 +1135,9 @@ mod time_tests {
         run(&mut g, 1);
         assert_eq!(g.phase, Phase::Playing);
         run(&mut g, 1);
+        assert_eq!(g.phase, Phase::Cut, "the tragic ending first");
+        assert_eq!(g.cut.as_ref().map(|c| c.num), Some(6));
+        run(&mut g, 400);
         assert_eq!(g.phase, Phase::TimeUp);
     }
 
