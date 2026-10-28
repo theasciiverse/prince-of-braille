@@ -287,6 +287,12 @@ impl Game {
                 }
                 op::NEXTLEVEL => {
                     self.add_sound(Sound::Upstairs);
+                    // GoneUpstairs: no music on level 13, the shadow's on 4
+                    match self.level.number {
+                        13 => {}
+                        4 => self.cuesong(crate::sid::Song::Shadow, 25),
+                        _ => self.cuesong(crate::sid::Song::Upstairs, 25),
+                    }
                     self.next_level = true;
                 }
                 op::EFFECT => {
@@ -340,23 +346,29 @@ impl Game {
         match kind {
             0xff => {
                 self.gotsword = true;
+                self.cuesong(crate::sid::Song::Sword, 25);
                 self.lightcolor = 0xff;
                 self.lightning = 3;
                 self.show_message("YOU HAVE THE SWORD".into(), 2 * FPS);
             }
             1 => {
                 if self.kid_strength != self.max_strength {
+                    self.cuesong(crate::sid::Song::ShortPot, 25);
                     self.lightcolor = 0x99;
                     self.lightning = 2;
                     self.chg_kid_str = 1;
                 }
             }
             2 => {
+                self.cuesong(crate::sid::Song::Potion, 25);
                 self.lightcolor = 0x99;
                 self.lightning = 5;
                 self.boostmeter();
             }
-            3 => self.weightless = 200,
+            3 => {
+                self.cuesong(crate::sid::Song::ShortPot, 25);
+                self.weightless = 200;
+            }
             4 => self.inverted = !self.inverted,
             5 => {
                 self.add_sound(Sound::Splat);

@@ -320,6 +320,7 @@ impl Game {
         self.lightcolor = 0xff;
         self.lightning = 10;
         self.boostmeter();
+        self.cuesong(crate::sid::Song::Rejoin, 85);
         self.mergetimer = 42;
         self.ch.id = 0;
         self.save_kid();
@@ -760,7 +761,11 @@ impl Game {
     /// DEADENEMY: music for a victory; on level 13 the vizier's death
     /// opens the exit.
     fn deadenemy(&mut self) {
+        if self.level.number != 13 && self.ch.id != 1 {
+            self.cuesong(crate::sid::Song::Vict, 25);
+        }
         if self.level.number == 13 {
+            self.cuesong(crate::sid::Song::Upstairs, 25);
             self.lightcolor = 0xff;
             self.lightning = 10;
             self.exitopen = 1;
@@ -1063,7 +1068,10 @@ impl Game {
                 if v != 1 {
                     return self.addnormalgd();
                 }
-                self.exitopen = 77;
+                if self.exitopen != 77 {
+                    self.cuesong(crate::sid::Song::Danger, 50);
+                    self.exitopen = 77;
+                }
                 self.csps(SHADPOS6A);
             }
             5 => {

@@ -245,11 +245,29 @@ per unit of SPEED, the drawing time around it is a guess that makes the
 usual SPEED 12 run at the game's 12 frames a second. `POB_CUT=n` with
 `--dump` starts scene n for testing.
 
-**Not done yet:** music (the song cues: danger, victory, death,
-Jaffar's theme, ...). Neither the music driver nor the songs are in the
-released source (MPLAY/MINIT only jump into a module that is not there),
-so every song cue takes the original's music-off path, and the music
-would have to be transcribed from recordings of the Apple II game.
+**Music** (2026-10-28): the Apple II music module is not in the released
+source, so the songs come from the C64 port's cartridge (`pop.crt`,
+EasyFlash; David's copy was in ~/Downloads). `tools/c64music.py` runs that
+port's own music driver (bank 29: init $804B, play $80CF, tempo from the
+CIA timer) in py65 and writes each song's SID register changes to
+`assets/c64/MUSIC.BIN`; `src/sid.rs` plays them back through a small
+SID-like synth (three voices, triangle/saw/pulse/noise, the SID's ADSR
+times; the songs leave the filter alone). Song numbers: the C64 port
+numbers its princess's-room songs as the Apple's title set does and its
+in-game songs 16 above their Apple numbers (worked out from its title
+sequence table and from songs it stores twice: 13 = 29 Timer, 16 = 32
+Heartbeat, 7 = 30 Princess/Tragic); `sid::Song::c64` holds the map. The
+cues are the Apple's (`src/music.rs`): CUESONG, songcues waiting for a
+still scene and then freezing the game while the song plays with only
+the torches burning, deathsong (accident, heroic, shadow), the sword, the
+potions, the exit opening, going upstairs, a guard killed, the level 4,
+6 and 12 shadow moments, the danger theme on starting level 1. In the
+princess's room a song plays with only the room moving. Unlike the
+original, the button cuts a song short. Muted (`m`, `--mute`), cues are
+forgotten and scenes take their silent frame counts, as the Apple did
+with the music off. Rebuild the data with `pip install py65` and
+`tools/c64music.py path/to/pop.crt`; `POB_WAV_DIR=dir cargo test
+write_wavs -- --ignored` writes every song as a WAV to listen to.
 
 **Clock** (2026-10-28): KEEPTIME, GETMINLEFT and SHOWTIME. It counts
 frames up, 725 to a minute (SPECIALK.S `min`), stops while the kid is

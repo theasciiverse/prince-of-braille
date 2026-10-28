@@ -18,10 +18,12 @@ mod game;
 mod guard;
 mod input;
 mod level;
+mod music;
 mod mover;
 mod render;
 mod room;
 mod seq;
+mod sid;
 mod sound;
 mod subs;
 mod theme;
@@ -128,8 +130,15 @@ fn run(terminal: &mut DefaultTerminal, level: u8, exact: bool, theme: theme::The
         while now >= next && steps < 3 {
             if !app.paused && !app.confirm_quit {
                 let c = input.controls(now);
+                app.game.music_on = app.audio.music_on();
                 app.game.tick(c);
                 app.audio.play(&app.game.sounds);
+                if app.game.song_stop {
+                    app.audio.stop_song();
+                }
+                if let Some(s) = app.game.song_start {
+                    app.audio.start_song(s);
+                }
             }
             next += tick;
             steps += 1;
@@ -321,6 +330,10 @@ fn handle(app: &mut App, cmd: Cmd) {
         Cmd::Pause => app.paused = !app.paused,
         Cmd::Mute => {
             app.audio.muted = !app.audio.muted;
+            if app.audio.muted {
+                app.audio.stop_song();
+                app.game.song = None;
+            }
             log::info!("sound muted {}", app.audio.muted);
         }
     }
