@@ -283,6 +283,7 @@ fn handle(app: &mut App, cmd: Cmd) {
         }
         Cmd::NextLevel => {
             let n = (g.level.number + 1).min(14);
+            g.shortentime();
             g.start_level(n, true);
         }
         Cmd::PrevLevel => {

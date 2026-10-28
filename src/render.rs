@@ -357,7 +357,11 @@ pub fn paint_status(buf: &mut Buffer, area: Rect, g: &Game, note: &str) {
         }
         rx = rx.saturating_sub(2);
     }
-    let right = format!("L{}  {} min  {}", g.level.number, g.minutes_left(), note);
+    let time = match g.time_left() {
+        (m, None) => format!("{m} min"),
+        (_, Some(s)) => format!("{s} sec"),
+    };
+    let right = format!("L{}  {time}  {}", g.level.number, note);
     let w = right.chars().count() as u16;
     if rx > area.x + w {
         buf.set_string(rx - w, y, &right, text);

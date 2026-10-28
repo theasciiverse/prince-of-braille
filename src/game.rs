@@ -15,7 +15,34 @@ pub const ALIVE: u8 = 0xff;
 
 /// One frame is 1/12 s, the speed the original runs at.
 pub const FPS: u32 = 12;
+/// SPECIALK.S: the clock counts frames, `min` of them to a "minute" and
+/// `sec` = min/60 to a second, with a limit of `t` minutes.
+pub const MIN_FRAMES: u32 = 725;
+pub const SEC_FRAMES: u32 = MIN_FRAMES / 60;
 pub const MINUTES: u32 = 60;
+/// SPECIALK.S timetable: FrameCount at which each time message is due,
+/// the last one five frames after t = 0 (game over).
+const TIMETABLE: [u32; 17] = [
+    0,
+    5 * MIN_FRAMES,
+    10 * MIN_FRAMES,
+    15 * MIN_FRAMES,
+    20 * MIN_FRAMES,
+    25 * MIN_FRAMES,
+    30 * MIN_FRAMES,
+    35 * MIN_FRAMES,
+    40 * MIN_FRAMES,
+    45 * MIN_FRAMES,
+    50 * MIN_FRAMES,
+    55 * MIN_FRAMES,
+    56 * MIN_FRAMES,
+    57 * MIN_FRAMES,
+    58 * MIN_FRAMES,
+    59 * MIN_FRAMES + 1,
+    60 * MIN_FRAMES + 5,
+];
+/// SUBS.S timemsgtimer
+const TIMEMSGTIMER: u32 = 20;
 
 /// TABLES.S, indexed by block y (-1..3) + 1.
 pub const BLOCK_BOT: [u8; 5] = [2, 65, 128, 191, 254];
@@ -219,7 +246,12 @@ pub struct Game {
     /// this frame's strength changes, applied by CHGMETERS (as bytes)
     pub chg_kid_str: u8,
     pub chg_opp_str: u8,
-    pub frames_left: u32,
+    /// FrameCount: frames played so far (the clock counts up)
+    pub frame_count: u32,
+    /// NextTimeMsg, as an index into TIMETABLE
+    pub next_time_msg: usize,
+    /// timerequest (SUBS.S SHOWTIME): 0 no, 1-2 auto, 4 vizier dead
+    pub time_request: u8,
     pub vis_scrn: u8,
     /// CUTTIMER: frames to wait before the next screen cut
     pub cuttimer: u8,
@@ -297,7 +329,9 @@ impl Game {
             max_opp_str: 0,
             chg_kid_str: 0,
             chg_opp_str: 0,
-            frames_left: MINUTES * 60 * FPS,
+            frame_count: 0,
+            next_time_msg: 0,
+            time_request: 0,
             vis_scrn: 1,
             cuttimer: 0,
             phase: Phase::Playing,
@@ -362,7 +396,8 @@ impl Game {
         self.gotsword = n != 1;
         self.shad = Char { id: 2, face: crate::guard::NO_CHAR, ..Char::default() };
         if !keep_time {
-            self.frames_left = MINUTES * 60 * FPS;
+            self.frame_count = 0;
+            self.next_time_msg = 0;
         }
         self.startkid(n);
         self.vis_scrn = 0;
@@ -438,8 +473,80 @@ impl Game {
         self.message = Some((s, frames));
     }
 
-    pub fn minutes_left(&self) -> u32 {
-        self.frames_left.div_ceil(60 * FPS)
+    /// GETMINLEFT (SPECIALK.S): minutes left, and seconds left during the
+    /// final minute (`None` before it).
+    pub fn time_left(&self) -> (u32, Option<u32>) {
+        let f = self.frame_count;
+        let min = MINUTES.saturating_sub(f / MIN_FRAMES);
+        if min >= 2 {
+            return (min, None);
+        }
+        let past = f.saturating_sub((MINUTES - 1) * MIN_FRAMES);
+        (min, Some(60u32.saturating_sub(past / SEC_FRAMES)))
+    }
+
+    fn time_message(&self) -> String {
+        match self.time_left() {
+            (m, None) => format!("{m} MINUTES LEFT"),
+            (_, Some(1)) => "1 SECOND LEFT".into(),
+            (_, Some(s)) => format!("{s} SECONDS LEFT"),
+        }
+    }
+
+    /// KEEPTIME (SPECIALK.S): the clock runs only while the kid is alive,
+    /// and puts up the next time message when it is due and the screen is
+    /// free of other messages.
+    fn keeptime(&mut self) {
+        if self.kid.life & 0x80 == 0 {
+            return;
+        }
+        self.frame_count += 1;
+        if let Some(&due) = TIMETABLE.get(self.next_time_msg) {
+            if self.frame_count >= due && self.message.is_none() {
+                self.next_time_msg += 1;
+                self.time_request = 2;
+            }
+        }
+    }
+
+    /// SHORTENTIME (SPECIALK.S): skipping a level cuts the time left to
+    /// 15 minutes, unless it is already that short.
+    pub fn shortentime(&mut self) {
+        if self.next_time_msg < 10 {
+            self.next_time_msg = 9;
+            self.frame_count = TIMETABLE[9];
+        }
+    }
+
+    /// SHOWTIME (SUBS.S): show the time if requested, and a constant
+    /// countdown through the final minute.
+    fn showtime(&mut self) {
+        if self.time_request == 0 || self.kid.life & 0x80 == 0 {
+            return;
+        }
+        match self.time_left() {
+            (_, Some(0)) => {}
+            (_, Some(s)) if self.level.number < 14 => {
+                // countdown: stays up while two or more seconds are left
+                if s < 2 {
+                    self.time_request = 0;
+                    if self.message.as_ref().is_some_and(|(m, _)| m.ends_with(" LEFT")) {
+                        self.message = None;
+                    }
+                } else if self.message.is_none() || self.message.as_ref().is_some_and(|(m, _)| m.ends_with(" LEFT")) {
+                    self.message = Some((self.time_message(), 2));
+                    self.time_request = 1;
+                }
+            }
+            _ => {
+                if self.message.is_some() {
+                    return;
+                }
+                let t = if self.time_request >= 4 { TIMEMSGTIMER + 5 } else { TIMEMSGTIMER };
+                self.show_message(self.time_message(), t);
+                self.time_request = 0;
+            }
+        }
     }
 
     /// One frame (TOPCTRL.S MainLoop and NextFrame), `c` is this frame's
@@ -466,6 +573,10 @@ impl Game {
                         self.phase = Phase::Won;
                     } else {
                         self.start_level(next, true);
+                        // LoadNextLevel: show the time left
+                        if next != 14 {
+                            self.time_request = 1;
+                        }
                     }
                 } else {
                     self.phase = Phase::LevelDone(n - 1);
@@ -508,16 +619,16 @@ impl Game {
             self.phase = Phase::LevelDone(0);
             return;
         }
+        // the clock stops on level 14, and on level 13 once the vizier is dead
         if self.level.number < 13 || (self.level.number == 13 && self.exitopen == 0) {
-            self.frames_left = self.frames_left.saturating_sub(1);
-            if self.frames_left == 0 && self.level.number < 13 {
-                self.phase = Phase::TimeUp;
-                self.show_message("TIME HAS EXPIRED".into(), u32::MAX);
-                log::info!("time up");
-            } else if self.frames_left % (60 * FPS) == 0 {
-                let m = self.minutes_left();
-                self.show_message(format!("{m} MINUTE{} LEFT", if m == 1 { "" } else { "S" }), 2 * FPS);
-            }
+            self.keeptime();
+        }
+        self.showtime();
+        // You have one chance to finish level 13 after time runs out
+        if self.level.number < 13 && self.frame_count >= TIMETABLE[TIMETABLE.len() - 1] {
+            self.phase = Phase::TimeUp;
+            self.show_message("TIME HAS EXPIRED".into(), u32::MAX);
+            log::info!("time up");
         }
         if self.kid.life & 0x80 == 0 {
             self.dead_frames += 1;
@@ -531,9 +642,7 @@ impl Game {
     /// Continue after death: restart the level, clock keeps running.
     pub fn restart_level(&mut self) {
         let n = self.level.number;
-        let t = self.frames_left;
         self.start_level(n, true);
-        self.frames_left = t;
     }
 
     /// Stand the kid on block (bx, by) of `scrn` (for headless runs and
@@ -967,5 +1076,88 @@ mod exit_tests {
             g.tick(Controls { x: 0, y: -1, btn: false });
         }
         assert_eq!(g.level.number, 1);
+    }
+}
+
+#[cfg(test)]
+mod time_tests {
+    use super::*;
+
+    fn run(g: &mut Game, frames: u32) {
+        for _ in 0..frames {
+            g.tick(Controls::default());
+        }
+    }
+
+    #[test]
+    fn getminleft_counts_725_frame_minutes_then_seconds() {
+        let mut g = Game::new(1);
+        assert_eq!(g.time_left(), (60, None));
+        g.frame_count = MIN_FRAMES - 1;
+        assert_eq!(g.time_left(), (60, None));
+        g.frame_count = MIN_FRAMES;
+        assert_eq!(g.time_left(), (59, None));
+        g.frame_count = 58 * MIN_FRAMES;
+        assert_eq!(g.time_left(), (2, None));
+        g.frame_count = 59 * MIN_FRAMES + 1;
+        assert_eq!(g.time_left(), (1, Some(60)));
+        g.frame_count = 59 * MIN_FRAMES + 60 * SEC_FRAMES;
+        assert_eq!(g.time_left(), (1, Some(0)));
+    }
+
+    #[test]
+    fn the_clock_stops_while_the_kid_is_dead() {
+        let mut g = Game::new(1);
+        run(&mut g, 10);
+        let f = g.frame_count;
+        assert!(f > 0);
+        g.kid.life = 0;
+        run(&mut g, 10);
+        assert_eq!(g.frame_count, f);
+    }
+
+    #[test]
+    fn time_runs_out_five_frames_after_t_zero() {
+        let mut g = Game::new(2);
+        g.frame_count = MINUTES * MIN_FRAMES + 3;
+        g.next_time_msg = TIMETABLE.len() - 1;
+        run(&mut g, 1);
+        assert_eq!(g.phase, Phase::Playing);
+        run(&mut g, 1);
+        assert_eq!(g.phase, Phase::TimeUp);
+    }
+
+    #[test]
+    fn the_final_minute_counts_down_on_screen() {
+        let mut g = Game::new(2);
+        g.message = None;
+        g.frame_count = 59 * MIN_FRAMES;
+        g.next_time_msg = 15;
+        run(&mut g, 2);
+        assert_eq!(g.message.as_ref().map(|(m, _)| m.as_str()), Some("60 SECONDS LEFT"));
+        run(&mut g, SEC_FRAMES * 10);
+        assert_eq!(g.message.as_ref().map(|(m, _)| m.as_str()), Some("50 SECONDS LEFT"));
+    }
+
+    #[test]
+    fn a_new_level_shows_the_time_after_its_name() {
+        let mut g = Game::new(2);
+        g.phase = Phase::LevelDone(0);
+        run(&mut g, 1);
+        assert_eq!(g.level.number, 3);
+        assert!(g.message.as_ref().is_some_and(|(m, _)| m.starts_with("LEVEL")));
+        run(&mut g, 3 * FPS + 1);
+        assert!(g.message.as_ref().is_some_and(|(m, _)| m.ends_with("MINUTES LEFT")), "{:?}", g.message);
+    }
+
+    #[test]
+    fn skipping_a_level_leaves_15_minutes() {
+        let mut g = Game::new(1);
+        g.shortentime();
+        assert_eq!(g.time_left(), (15, None));
+        g.frame_count = 50 * MIN_FRAMES;
+        g.next_time_msg = 11;
+        g.shortentime();
+        assert_eq!(g.time_left(), (10, None));
     }
 }

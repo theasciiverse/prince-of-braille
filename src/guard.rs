@@ -764,6 +764,8 @@ impl Game {
             self.lightcolor = 0xff;
             self.lightning = 10;
             self.exitopen = 1;
+            // the clock stops: show the time left
+            self.time_request = 4;
             self.rdblock(24, 0, 0);
             self.pushpp();
             log::info!("vizier dead: exit opens");
