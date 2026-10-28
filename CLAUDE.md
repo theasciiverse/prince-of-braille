@@ -234,9 +234,33 @@ released source, but the princess's room itself is a packed full-screen
 picture (MASTER.S `pacProom`, loaded by LoadStage2) that is not in the
 release, so the scenes cannot be drawn as the original drew them. Also
 not done: music (the song cues: danger, victory, death, Jaffar's
-theme, ...), CROPCHAR-style cropping of characters (a
-stand-in redraws floor lips over a hanging kid; the reflection and the
-level 4 shadow are cropped). The timer runs on real minutes at 12 fps.
+theme, ...). Neither the music driver nor the songs are in the released
+source (MPLAY/MINIT only jump into a module that is not there), so music
+would have to be rebuilt by ear.
+
+**Clock** (2026-10-28): KEEPTIME, GETMINLEFT and SHOWTIME. It counts
+frames up, 725 to a minute (SPECIALK.S `min`), stops while the kid is
+dead, shows the time at the timetable's marks, after the level name and
+when the vizier dies, counts down in seconds through the final minute,
+and runs out five frames after t = 0. `n` cuts the time left to 15
+minutes, as the original's level skip did (SHORTENTIME).
+
+**Characters in the scene** (2026-10-28): CROPCHAR, INDEXCHAR and
+QUICKFLOOR. Each character is cropped (under a solid floor, left of a
+panel or block, climbing the stairs) and drawn with the block INDEXCHAR
+gives him; the mid plane goes block by block, bottom row up, left to
+right, each block's QUICKFLOOR-marked floorpiece before the characters
+indexed to it, as FRAMEADV.S FAST does. Impact stars come last. Mirrored
+images now end just left of x (MLAY subtracts the width from XCO): the
+port had drawn every right-facing character 7 pixels too far right since
+the first cut.
+
+**Open, needs an emulator to settle:** facing right into a palace panel
+(level 10 screen 1, after the bump) the kid's image lies inside the
+wall's picture and the panel's front piece covers him, so he all but
+vanishes. The bump position matches COLL.S and the mirror rule matches
+MLAY; facing left the kid overlaps a wall by a few pixels only. Compare
+against a real Apple II before changing anything here.
 
 ## Rights: what Mechner's README actually says
 

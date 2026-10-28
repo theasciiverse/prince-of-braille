@@ -241,6 +241,8 @@ pub fn draw(scr: &mut Screen, g: &Game) {
     };
 
     let mut fronts: Vec<Blk> = Vec::new();
+    // drawexitb's doortop, for CROPCHAR
+    let mut doortop = None;
     for row in (0..3).rev() {
         let dy = BLOCK_BOT[row as usize + 1] as i32;
         let (mut preced, mut spreced) = prev(row);
@@ -262,6 +264,10 @@ pub fn draw(scr: &mut Screen, g: &Game) {
                 rowno: row,
             };
             redblocksure(&mut p, &v, g, &b);
+            if id == obj::EXIT && b.xco < 36 && b.dy >= 67 {
+                let gateposn = (st.min(EMAXVAL) >> 2) as i32;
+                doortop = Some(b.ay - 14 - gateposn);
+            }
             fronts.push(b);
             preced = id;
             spreced = st;
@@ -307,11 +313,25 @@ pub fn draw(scr: &mut Screen, g: &Game) {
 
     // the reflection, the shadowman or guard, then the kid (addchars)
     draw_reflection(p.scr, g);
-    draw_shad(p.scr, g);
-    draw_kid(p.scr, g);
+    let mut objs = Objs::default();
+    add_shad(&mut objs, g, doortop);
+    add_kid(&mut objs, g, doortop);
 
-    // floorpieces in front of a hanging/climbing kid
-    redraw_floor_over_kid(&mut p, g, &fronts);
+    // the mid plane, block by block as FAST draws it: characters off the
+    // screen's blocks first, then each block's marked floorpiece and the
+    // characters indexed to it, bottom row to top, left to right; the
+    // impact stars last
+    objs.draw(&mut p, g, 30);
+    for b in fronts.iter().filter(|b| b.rowno >= 0) {
+        let i = (b.rowno * 10 + b.colno) as usize;
+        match objs.floors[i] {
+            1 => drawfloor(&mut p, b),
+            2 => drawhalf(&mut p, &v, b),
+            _ => {}
+        }
+        objs.draw(&mut p, g, i as u8);
+    }
+    objs.draw(&mut p, g, 0xff);
 
     // front pieces over everything
     for b in &fronts {
@@ -679,41 +699,303 @@ fn draw_mob(p: &mut Painter, g: &Game, m: &Mob) {
     p.add(LOOSEB, x + 4, y - 4, Op::Or, Ink::Floor);
 }
 
-/// Lay the kid (and his sword) with the mask/OR opacity.
-fn draw_kid(scr: &mut Screen, g: &Game) {
+/// A character, his sword or an impact star in the object list
+/// (GAMEBG.S ADDCHAROBJ): its frame, how it is laid, its crop box
+/// (FCharCL/CU/CR/CD in pixels) and the block it is drawn with.
+#[derive(Clone, Copy)]
+struct Obj {
+    f: FChar,
+    op: Op,
+    ink: Ink,
+    shift: i32,
+    crop: (i32, i32, i32, i32),
+    /// INDEXCHAR's block 0-29, 30 off the screen's blocks, $ff with the stars
+    index: u8,
+    /// the shadowman is always in front (FRAMEADV.S compare)
+    shad: bool,
+}
+
+#[derive(Default)]
+struct Objs {
+    list: Vec<Obj>,
+    /// QUICKFLOOR's marks per block: 1 floorbuf, 2 halfbuf
+    floors: [u8; 30],
+}
+
+const ZEROCROP: (i32, i32, i32, i32) = (0, 0, apple::SCREEN_W, apple::SCREEN_H);
+
+impl Objs {
+    /// drawobjs: the objects with this index, sorted back to front
+    /// (sortlist: an object lower on the screen goes behind one higher
+    /// up, the shadowman in front of all).
+    fn draw(&self, p: &mut Painter, g: &Game, index: u8) {
+        let mut sort: Vec<&Obj> = self.list.iter().filter(|o| o.index == index).collect();
+        loop {
+            let mut switched = false;
+            for x in (1..sort.len()).rev() {
+                let (a, b) = (sort[x], sort[x - 1]);
+                if !a.shad && a.f.y > b.f.y {
+                    sort.swap(x, x - 1);
+                    switched = true;
+                }
+            }
+            if !switched {
+                break;
+            }
+        }
+        for o in sort {
+            let Some(img) = apple::chtable(o.f.table, g.level.number).and_then(|t| t.get(o.f.image)) else { continue };
+            p.scr.lay_clip(&img, o.f.x + o.shift, o.f.y as i32, o.f.face & 0x80 == 0, o.op, o.ink, o.crop);
+        }
+    }
+}
+
+/// SETUPKID: the kid, cropped and indexed, with his sword and impact star.
+fn add_kid(objs: &mut Objs, g: &Game, doortop: Option<i32>) {
     if g.kid.scrn != g.vis_scrn || g.kid.scrn == 0 {
         return;
     }
-    let (f, frame) = setupchar(&g.kid);
     // after the merge on level 12 the kid flashes between kid and shadow
     let op = if g.mergetimer > 0 && g.mergetimer & 1 != 0 { Op::Eor } else { Op::Mask };
-    lay_char(scr, g, &f, 0, op, Ink::Kid);
-    if g.chg_kid_str & 0x80 != 0 {
-        draw_comix(scr, g, &g.kid, &f);
-    }
-    draw_sword(scr, g, &g.kid, &f, &frame);
+    add_char(objs, g, &g.kid, op, Ink::Kid, 0, 0, doortop, g.chg_kid_str & 0x80 != 0);
 }
 
-/// The opponent: a guard is drawn normally (shifted a pixel for the other
+/// SETUPSHAD: a guard is drawn normally (shifted a pixel for the other
 /// uniform colour, GAMEBG.S DrawShifted), the shadowman EORed.
-fn draw_shad(scr: &mut Screen, g: &Game) {
+fn add_shad(objs: &mut Objs, g: &Game, doortop: Option<i32>) {
     let c = &g.shad;
     if c.face == crate::guard::NO_CHAR || c.scrn != g.vis_scrn {
         return;
     }
-    let (f, frame) = setupchar(c);
     if c.id == 1 {
         // clipped at the left as he jumps out of the level 4 mirror
         let left = if g.level.number == 4 && c.scrn == 4 { (4 * 4 + 1) * 7 } else { 0 };
-        lay_char_crop(scr, g, &f, Op::Eor, Ink::Guard, left, 0);
+        add_char(objs, g, c, Op::Eor, Ink::Guard, 0, left, doortop, g.chg_opp_str & 0x80 != 0);
     } else {
         let shift = if c.id == 24 { 0 } else { g.guard_color as i32 & 1 };
-        lay_char(scr, g, &f, shift, Op::Mask, Ink::Guard);
+        add_char(objs, g, c, Op::Mask, Ink::Guard, shift, 0, doortop, g.chg_opp_str & 0x80 != 0);
     }
-    if g.chg_opp_str & 0x80 != 0 {
-        draw_comix(scr, g, c, &f);
+}
+
+#[allow(clippy::too_many_arguments)]
+fn add_char(objs: &mut Objs, g: &Game, c: &Char, op: Op, ink: Ink, shift: i32, left: i32, doortop: Option<i32>, hurt: bool) {
+    let (f, frame) = setupchar(c);
+    let Some(e) = draw_edges(g, c, &f, frame.check) else { return };
+    let index = indexchar(c, &e);
+    quickfloor(c, &e, &mut objs.floors);
+    let mut crop = cropchar(g, c, &f, &e, doortop);
+    crop.0 = crop.0.max(left);
+    let shad = c.id == 1 && op == Op::Eor;
+    objs.list.push(Obj { f, op, ink, shift, crop, index, shad });
+    if hurt {
+        if let Some(mut star) = comix(c, &f) {
+            star.index = 0xff;
+            objs.list.push(star);
+        }
     }
-    draw_sword(scr, g, c, &f, &frame);
+    if let Some(sf) = sword(c, &f, &frame) {
+        objs.list.push(Obj { f: sf, op: Op::Mask, ink: Ink::Sword, shift: 0, crop, index, shad: false });
+    }
+}
+
+/// GETEDGES (CTRLSUBS.S) for drawing: the blocks a character's image
+/// covers.
+struct DrawEdges {
+    topej: u8,
+    topblock: i32,
+    bottomblock: i32,
+    leftblock: i32,
+    rightblock: i32,
+    cd_left: u8,
+    cd_right: u8,
+}
+
+/// GETBLOCKY: block row of screen line `a` (-1 above row 0).
+fn getblocky(a: u8) -> i32 {
+    (0..4).rev().find(|&x| a >= BLOCK_TOP[x + 1]).map_or(-1, |x| x as i32)
+}
+
+fn draw_edges(g: &Game, c: &Char, f: &FChar, check: u8) -> Option<DrawEdges> {
+    let img = apple::chtable(f.table, g.level.number)?.get(f.image)?;
+    let imwidth = ((img.w as u16 * 7 + 1) >> 1) as u8;
+    let x140 = ((f.x >> 1) as u8).wrapping_add(SCRN_LEFT);
+    let left = if c.face & 0x80 != 0 { x140 } else { x140.wrapping_sub(imwidth) };
+    let right = left.wrapping_add(imwidth);
+    let mut topej = f.y.wrapping_sub(img.h as u8).wrapping_add(1);
+    if topej >= 192 {
+        topej = 0;
+    }
+    let topblock = match getblocky(topej) {
+        3 => -1,
+        b => b,
+    };
+    let thin = if check & crate::seq::FTHINMARK != 0 { crate::subs::THINNER } else { 0 };
+    Some(DrawEdges {
+        topej,
+        topblock,
+        bottomblock: getblocky(f.y),
+        leftblock: getblockx(left).0 as i32,
+        rightblock: getblockx(right).0 as i32,
+        cd_left: left.wrapping_add(thin),
+        cd_right: right.wrapping_sub(thin),
+    })
+}
+
+/// INDEXBLOCK: block number 0-29; a block above the screen gives its
+/// column, one off the screen 30.
+fn indexblock(x: i32, y: i32) -> (u8, bool) {
+    if y < 0 {
+        (x as u8, false)
+    } else if y >= 3 || !(0..10).contains(&x) {
+        (30, false)
+    } else {
+        ((y * 10 + x) as u8, true)
+    }
+}
+
+/// INDEXCHAR: the block a character is drawn with. The test for falling
+/// compares CharPosn, not CharAction, with 2, 3, 4 and 6 (A still holds
+/// the position there); kept as the original has it.
+fn indexchar(c: &Char, e: &DrawEdges) -> u8 {
+    let (mut x, y) = if c.action == 1 {
+        (e.leftblock, e.bottomblock)
+    } else {
+        (c.block_x as i8 as i32, c.block_y as i8 as i32)
+    };
+    if (135..149).contains(&c.posn) || matches!(c.posn, 2 | 3 | 4 | 6) {
+        x -= 1;
+    }
+    indexblock(x, y).0
+}
+
+/// QUICKFLOOR: mark the floorpieces a hanging, falling or climbing
+/// character may overlap, to be drawn again in front of him.
+fn quickfloor(c: &Char, e: &DrawEdges, marks: &mut [u8; 30]) {
+    let mark = if (135..149).contains(&c.posn) {
+        2
+    } else if c.action == 1 {
+        if !(78..80).contains(&c.posn) {
+            return;
+        }
+        1
+    } else if matches!(c.action, 2 | 3 | 4 | 6) {
+        1
+    } else {
+        return;
+    };
+    let mut x = e.rightblock;
+    loop {
+        for y in [e.bottomblock, e.topblock] {
+            if let (i, true) = indexblock(x, y) {
+                marks[i as usize] = marks[i as usize].max(mark);
+            }
+            if e.topblock == e.bottomblock {
+                break;
+            }
+        }
+        if x == e.leftblock {
+            break;
+        }
+        x -= 1;
+        if x < 0 {
+            break;
+        }
+    }
+}
+
+/// CROPCHAR (CTRLSUBS.S): crop a character climbing the stairs to the
+/// door, one under a solid floor at the top, and one standing left of a
+/// panel or solid block at the right.
+fn cropchar(g: &Game, c: &Char, f: &FChar, e: &DrawEdges, doortop: Option<i32>) -> (i32, i32, i32, i32) {
+    let mut crop = ZEROCROP;
+    if (224..229).contains(&c.posn) {
+        if let Some(d) = doortop {
+            if d + 2 < f.y as i32 {
+                crop.1 = d + 2;
+            }
+        }
+        return crop;
+    }
+    let l = &g.level;
+    let s = c.scrn;
+    let by = c.block_y as i8 as i32;
+    let solid = |id: u8| id == obj::BLOCK || !crate::level::is_space(id);
+
+    // under a solid floor: crop the top
+    if solid(l.rdblock(s, e.leftblock, e.topblock).id) {
+        let jumpup = c.action == 0 && matches!(c.posn, 79 | 81);
+        if jumpup || solid(l.rdblock(s, e.rightblock, e.topblock).id) {
+            let top = BLOCK_TOP[(by + 1).clamp(0, 4) as usize];
+            if by == 0 || (top < f.y && top.wrapping_sub(FLOORHEIGHT) < e.topej) {
+                crop.1 = top as i32;
+            }
+        }
+    }
+
+    // standing left of a panel: crop the right
+    let bx = getblockx(e.cd_left).0 as i32;
+    let foot = l.rdblock(s, bx, by);
+    if matches!(foot.id, obj::PANELWOF | obj::PANELWIF) {
+        let wall = if c.face & 0x80 == 0 && c.action == 2 {
+            Some(foot) // hanging facing right: no need to check his head
+        } else {
+            let head = l.rdblock(s, bx, e.topblock);
+            matches!(head.id, obj::BLOCK | obj::PANELWOF | obj::PANELWIF).then_some(head)
+        };
+        if let Some(w) = wall {
+            crop.2 = (w.bx * 4 + 4) * 7;
+            return crop;
+        }
+    }
+
+    // left of a solid block
+    let bx = getblockx(e.cd_right).0 as i32;
+    if l.rdblock(s, bx, by).id == obj::BLOCK {
+        let head = l.rdblock(s, bx, e.topblock);
+        if head.id == obj::BLOCK && head.scrn == s {
+            crop.2 = head.bx * 4 * 7;
+        }
+    }
+    crop
+}
+
+/// GAMEEQ.S floorheight
+const FLOORHEIGHT: u8 = 15;
+
+/// drawfloor (FRAMEADV.S): a floorpiece drawn again in front of a
+/// character, where there is empty space to its left.
+fn drawfloor(p: &mut Painter, b: &Blk) {
+    if b.preced != obj::SPACE {
+        return;
+    }
+    drawflr(p, b);
+}
+
+fn drawflr(p: &mut Painter, b: &Blk) {
+    p.add(MASKA[b.objid as usize % 30], b.xco, b.ay, Op::And, Ink::None);
+    drawa(p, b);
+    drawma(p, b);
+    drawd(p, b);
+}
+
+/// drawhalf: drawfloor for a kid climbing up, only the front half of the
+/// piece where there is one.
+fn drawhalf(p: &mut Painter, v: &View, b: &Blk) {
+    const CUMASK: u8 = 0x11;
+    const CUPIECE: u8 = 0x12;
+    const CUPOST: u8 = 0x0e;
+    if b.preced != obj::SPACE {
+        return;
+    }
+    let img = match b.objid {
+        obj::FLOOR | obj::TORCH | obj::DPRESSPLATE | obj::EXIT => CUPIECE,
+        obj::POSTS | obj::ARCHBOT if v.palace => CUPOST,
+        _ => return drawflr(p, b),
+    };
+    let y = if b.objid == obj::DPRESSPLATE { b.ay + 1 } else { b.ay };
+    p.add(CUMASK, b.xco, y, Op::And, Ink::None);
+    p.add(img, b.xco, y, Op::Or, Ink::Floor);
+    drawd(p, b);
 }
 
 /// The kid's reflection in a mirror, cropped to the mirror.
@@ -733,12 +1015,6 @@ fn lay_char_crop(scr: &mut Screen, g: &Game, f: &FChar, op: Op, ink: Ink, left: 
     scr.lay_crop(&img, f.x, f.y as i32, f.face & 0x80 == 0, op, ink, left, top);
 }
 
-fn lay_char(scr: &mut Screen, g: &Game, f: &FChar, shift: i32, op: Op, ink: Ink) {
-    let Some(img) = apple::chtable(f.table, g.level.number).and_then(|t| t.get(f.image)) else { return };
-    let mirror = f.face & 0x80 == 0;
-    scr.lay(&img, f.x + shift, f.y as i32, mirror, op, ink);
-}
-
 /// ADDFCHARX: FCharX + `a` in the direction the image faces.
 fn addfcharx(f: &FChar, a: u8) -> i32 {
     let a = a as i8 as i32;
@@ -750,29 +1026,28 @@ fn addfcharx(f: &FChar, a: u8) -> i32 {
 }
 
 /// SETUPSWORD: the sword in the character's hand, when it shows.
-fn draw_sword(scr: &mut Screen, g: &Game, c: &Char, f: &FChar, frame: &crate::seq::Frame) {
+fn sword(c: &Char, f: &FChar, frame: &crate::seq::Frame) -> Option<FChar> {
     let shows = (c.id == 2 && c.life & 0x80 != 0) || (229..238).contains(&c.posn) || c.sword != 0;
     if !shows {
-        return;
+        return None;
     }
     let n = frame.sword & 0x3f;
     if n == 0 {
-        return;
+        return None;
     }
     let (image, dx, dy) = crate::seq::sword(n);
     if image == 0 {
-        return;
+        return None;
     }
-    let sf = FChar { x: addfcharx(f, dx), y: f.y.wrapping_add(dy), face: f.face, image, table: 2 };
-    lay_char(scr, g, &sf, 0, Op::Mask, Ink::Sword);
+    Some(FChar { x: addfcharx(f, dx), y: f.y.wrapping_add(dy), face: f.face, image, table: 2 })
 }
 
 /// SETUPCOMIX: the impact star on a character who has just been hurt.
-fn draw_comix(scr: &mut Screen, g: &Game, c: &Char, f: &FChar) {
+fn comix(c: &Char, f: &FChar) -> Option<Obj> {
     const STARIMAGE: u8 = 0x41;
     let mut sf = *f;
     match c.posn {
-        178 => return,
+        178 => return None,
         177 => {
             sf.x = addfcharx(&sf, (-5i8) as u8);
         }
@@ -793,29 +1068,7 @@ fn draw_comix(scr: &mut Screen, g: &Game, c: &Char, f: &FChar) {
     }
     sf.image = STARIMAGE;
     sf.table = 0;
-    lay_char(scr, g, &sf, 0, Op::Mask, Ink::Flame);
-}
-
-/// Floorpieces whose left lip overlaps a hanging or climbing kid get
-/// redrawn over him (a stand-in for the original's CROPCHAR/drawfloor).
-fn redraw_floor_over_kid(p: &mut Painter, g: &Game, blocks: &[Blk]) {
-    let pn = g.kid.posn;
-    let hanging = (87..100).contains(&pn) || (135..149).contains(&pn) || matches!(g.kid.action, 2 | 6);
-    if !hanging || g.kid.scrn != g.vis_scrn {
-        return;
-    }
-    let ky = g.kid.block_y as i8 as i32;
-    for b in blocks {
-        if b.rowno != ky - 1 || b.preced != obj::SPACE || crate::level::is_space(b.objid) {
-            continue;
-        }
-        let kx = g.kid.block_x as i8 as i32;
-        if (b.colno - kx).abs() > 1 {
-            continue;
-        }
-        drawa(p, b);
-        drawd(p, b);
-    }
+    Some(Obj { f: sf, op: Op::Mask, ink: Ink::Flame, shift: 0, crop: ZEROCROP, index: 0xff, shad: false })
 }
 
 /// SETUPCHAR for drawing, on a copy so drawing never mutates Game.
@@ -833,4 +1086,37 @@ fn setupchar(c: &Char) -> (FChar, crate::seq::Frame) {
         px += 1;
     }
     (FChar { x: px, y: frame.dy.wrapping_add(c.y), face: c.face, image, table }, frame)
+}
+
+#[cfg(test)]
+mod crop_tests {
+    use super::*;
+
+    #[test]
+    fn getblocky_follows_blocktop() {
+        assert_eq!(getblocky(0), -1);
+        assert_eq!(getblocky(3), 0);
+        assert_eq!(getblocky(66), 1);
+        assert_eq!(getblocky(191), 2);
+        assert_eq!(getblocky(192), 3);
+    }
+
+    #[test]
+    fn indexblock_numbers_blocks_and_columns_above() {
+        assert_eq!(indexblock(3, 1), (13, true));
+        assert_eq!(indexblock(4, -1), (4, false));
+        assert_eq!(indexblock(10, 1), (30, false));
+        assert_eq!(indexblock(0, 3), (30, false));
+    }
+
+    #[test]
+    fn a_hanging_kid_marks_the_floors_he_overlaps() {
+        let c = Char { posn: 140, action: 1, ..Char::default() };
+        let e = DrawEdges { topej: 70, topblock: 1, bottomblock: 2, leftblock: 3, rightblock: 4, cd_left: 0, cd_right: 0 };
+        let mut marks = [0u8; 30];
+        quickfloor(&c, &e, &mut marks);
+        let marked: Vec<usize> = (0..30).filter(|&i| marks[i] != 0).collect();
+        assert_eq!(marked, vec![13, 14, 23, 24]);
+        assert!(marks.iter().all(|&m| m == 0 || m == 2), "climbing up marks halves");
+    }
 }

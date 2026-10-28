@@ -250,8 +250,9 @@ impl Screen {
     }
 
     /// Lay `img` with its bottom-left pixel at (`x`, `ybot`) in 280-res
-    /// pixels. Mirrored images are laid right to left from `x` + 6, the way
-    /// MLAY treats XCO as the image's bottom right byte.
+    /// pixels. Mirrored images end just left of `x`: MLAY subtracts the
+    /// image's width from XCO and lays the mirrored bytes from there, so
+    /// pixel c of the image lands at x - 1 - c.
     pub fn lay(&mut self, img: &Image, x: i32, ybot: i32, mirror: bool, op: Op, ink: Ink) {
         self.lay_crop(img, x, ybot, mirror, op, ink, 0, 0);
     }
@@ -260,15 +261,23 @@ impl Screen {
     /// `top` (CROPCHAR's FCharCL / FCharCU).
     #[allow(clippy::too_many_arguments)]
     pub fn lay_crop(&mut self, img: &Image, x: i32, ybot: i32, mirror: bool, op: Op, ink: Ink, left: i32, top: i32) {
+        self.lay_clip(img, x, ybot, mirror, op, ink, (left, top, SCREEN_W, SCREEN_H));
+    }
+
+    /// `lay` inside the box (left, top, right, bottom), right and bottom
+    /// exclusive: HIRES.S's LEFTCUT, TOPCUT, RIGHTCUT and BOTCUT in pixels.
+    #[allow(clippy::too_many_arguments)]
+    pub fn lay_clip(&mut self, img: &Image, x: i32, ybot: i32, mirror: bool, op: Op, ink: Ink, clip: (i32, i32, i32, i32)) {
+        let (left, top, right, bot) = clip;
         let wpx = img.width_px();
         for row in 0..img.h {
             let y = ybot - row as i32;
-            if !(top.max(0)..SCREEN_H).contains(&y) {
+            if !(top.max(0)..bot.min(SCREEN_H)).contains(&y) {
                 continue;
             }
             let sx = |c: i32| {
-                let v = if mirror { x + 6 - c } else { x + c };
-                if v < left {
+                let v = if mirror { x - 1 - c } else { x + c };
+                if v < left || v >= right {
                     -1
                 } else {
                     v
@@ -328,6 +337,22 @@ impl Screen {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_mirrored_image_ends_just_left_of_x() {
+        // MLAY: XCO - WIDTH is the left byte, so image pixel c lands at x - 1 - c
+        let img = chtable(1, 1).unwrap().get(15).unwrap();
+        let (mut a, mut b) = (Screen::default(), Screen::default());
+        a.lay(&img, 100, 150, false, Op::Or, Ink::Kid);
+        b.lay(&img, 100, 150, true, Op::Or, Ink::Kid);
+        let cols = |s: &Screen| {
+            let xs: Vec<i32> = (0..SCREEN_W).filter(|&x| (0..SCREEN_H).any(|y| s.px[(y * SCREEN_W + x) as usize] != Ink::None)).collect();
+            (*xs.first().unwrap(), *xs.last().unwrap())
+        };
+        let (l, r) = cols(&a);
+        let (ml, mr) = cols(&b);
+        assert_eq!((ml, mr), (99 - (r - 100), 99 - (l - 100)));
+    }
 
     #[test]
     fn every_table_parses() {
