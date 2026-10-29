@@ -19,8 +19,9 @@ av install prince-of-braille
 av play prince-of-braille
 ```
 
-Or from the source: `cargo run --release -- [LEVEL]`. `--demo` plays the
-original's attract demo; any key starts a game from it.
+Or from the source: `cargo run --release -- [LEVEL]`. Without a level it
+opens with the DOS title and story, the princess's room and the demo,
+round and round; any key starts a game. `--demo` plays just the demo.
 
 Needs a terminal with truecolour and a font with the Braille block. The
 picture fills the window at any size; 80x24 is playable, 160x59 shows every
@@ -43,7 +44,7 @@ pixel of the DOS art.
 From level 3 on, reaching a level saves the game, and Ctrl-G saves it
 there and then, as in the original. A saved game keeps the level, the time
 left and your strength; it continues from the start of that level. Ctrl-L
-continues it from the opening scene, the demo or the end of a game.
+continues it from the title, its story or the demo.
 
 In terminals with the kitty keyboard protocol (kitty, WezTerm, foot,
 Ghostty and others) keys are read exactly; elsewhere a held key is

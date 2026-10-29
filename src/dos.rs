@@ -28,16 +28,22 @@ pub const H: i32 = 192;
 pub struct Pic {
     pub col: Vec<[u8; 3]>,
     pub kid: Vec<bool>,
+    /// lines: H for the game, 200 for a whole DOS screen
+    pub h: i32,
 }
 
 impl Pic {
     pub(crate) fn new() -> Pic {
-        let n = (W * H) as usize;
-        Pic { col: vec![[0; 3]; n], kid: vec![false; n] }
+        Pic::tall(H)
+    }
+
+    pub(crate) fn tall(h: i32) -> Pic {
+        let n = (W * h) as usize;
+        Pic { col: vec![[0; 3]; n], kid: vec![false; n], h }
     }
 
     pub(crate) fn put(&mut self, x: i32, y: i32, c: [u8; 3], kid: bool) {
-        if (0..W).contains(&x) && (0..H).contains(&y) {
+        if (0..W).contains(&x) && (0..self.h).contains(&y) {
             let i = (y * W + x) as usize;
             self.col[i] = c;
             self.kid[i] = kid;
@@ -52,11 +58,11 @@ impl Pic {
         }
     }
 
-    /// Swap line y with line H - 1 - y (the upside-down potion).
+    /// Swap line y with line h - 1 - y (the upside-down potion).
     pub fn flip_vertical(&mut self) {
-        let w = W as usize;
-        for y in 0..H as usize / 2 {
-            let z = H as usize - 1 - y;
+        let (w, h) = (W as usize, self.h as usize);
+        for y in 0..h / 2 {
+            let z = h - 1 - y;
             for x in 0..w {
                 self.col.swap(y * w + x, z * w + x);
                 self.kid.swap(y * w + x, z * w + x);
@@ -87,6 +93,8 @@ pub(crate) enum S {
     Vizier,
     Mouse,
     Guard(u8),
+    /// the title and story screens
+    Title,
 }
 
 fn decode(png: &[u8], frames: atlas::Frames) -> Sheet {
@@ -135,6 +143,7 @@ fn sheet(s: S) -> &'static Sheet {
         v.push(decode(include_bytes!("../assets/dos/guard-5.png"), atlas::GUARD_5));
         v.push(decode(include_bytes!("../assets/dos/guard-6.png"), atlas::GUARD_6));
         v.push(decode(include_bytes!("../assets/dos/guard-7.png"), atlas::GUARD_7));
+        v.push(decode(include_bytes!("../assets/dos/title.png"), atlas::TITLE));
         v
     });
     let i = match s {
@@ -151,6 +160,7 @@ fn sheet(s: S) -> &'static Sheet {
         S::Vizier => 10,
         S::Mouse => 11,
         S::Guard(c) => 11 + c.clamp(1, 7) as usize,
+        S::Title => 19,
     };
     &all[i]
 }

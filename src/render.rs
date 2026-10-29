@@ -251,18 +251,18 @@ pub fn paint_screen(buf: &mut Buffer, area: Rect, scr: &Screen, scale: i32, glyp
 const DOS_ASPECT: f32 = 1.2;
 
 /// The cells the DOS picture takes in `area`: as large as fits, centred.
-pub fn dos_fit(area: Rect) -> Rect {
+pub fn dos_fit(area: Rect, lines: i32) -> Rect {
     let (dw, dh) = (area.width as f32 * 2.0, area.height as f32 * 4.0);
-    let s = (dw / crate::dos::W as f32).min(dh / (crate::dos::H as f32 * DOS_ASPECT));
+    let s = (dw / crate::dos::W as f32).min(dh / (lines as f32 * DOS_ASPECT));
     let w = ((crate::dos::W as f32 * s / 2.0).floor() as u16).min(area.width);
-    let h = ((crate::dos::H as f32 * DOS_ASPECT * s / 4.0).floor() as u16).min(area.height);
+    let h = ((lines as f32 * DOS_ASPECT * s / 4.0).floor() as u16).min(area.height);
     Rect::new(area.x + (area.width - w) / 2, area.y + (area.height - h) / 2, w, h)
 }
 
 /// Paint the DOS picture into `area` (from dos_fit), each dot the average
 /// of the pixels under it; a dot is a character's when any of them is.
 pub fn paint_dos(buf: &mut Buffer, area: Rect, pic: &crate::dos::Pic, glyphs: Glyphs) {
-    let (pw, ph) = (crate::dos::W, crate::dos::H);
+    let (pw, ph) = (crate::dos::W, pic.h);
     let (dw, dh) = (area.width as i32 * 2, area.height as i32 * 4);
     let span = |d: i32, n: i32, of: i32| (d * of / n, ((d + 1) * of / n).max(d * of / n + 1).min(of));
     let dot = |x: i32, y: i32| -> (bool, [u8; 3]) {
@@ -403,6 +403,14 @@ pub fn paint_flash(buf: &mut Buffer, area: Rect, color: u8) {
     }
 }
 
+/// What a key does at the title, in its story and in the demo.
+pub fn attract_hint(resume: Option<u8>) -> String {
+    match resume {
+        Some(n) => format!("Any key plays, Ctrl-L continues level {n}"),
+        None => "Any key plays".to_string(),
+    }
+}
+
 /// `resume`: the level of the saved game, offered where Ctrl-L resumes it.
 pub fn paint_status(buf: &mut Buffer, area: Rect, g: &Game, note: &str, resume: Option<u8>) {
     let y = area.y;
@@ -422,18 +430,11 @@ pub fn paint_status(buf: &mut Buffer, area: Rect, g: &Game, note: &str, resume: 
         }
         x += 1;
     }
-    let opening = g.cut.as_ref().is_some_and(|c| c.after == crate::cut::After::NewGame);
-    let resume = resume.map(|n| format!("Ctrl-L continues level {n}"));
+    let attract = g.level.number == 0 || g.cut.as_ref().is_some_and(|c| c.after == crate::cut::After::Attract);
     let msg = match g.phase {
+        _ if attract => Some(attract_hint(resume)),
         Phase::Dead(_) if g.dead_frames > 24 => Some("Press SPACE to continue".to_string()),
-        Phase::TimeUp => Some(match resume {
-            Some(r) => format!("TIME HAS EXPIRED  (R restarts, {r}, Esc quits)"),
-            None => "TIME HAS EXPIRED  (R restarts, Esc quits)".to_string(),
-        }),
-        Phase::Won => Some("YOU WIN".to_string()),
-        Phase::Cut if opening && resume.is_some() => Some(format!("Space skips, {}", resume.unwrap())),
         Phase::Cut => Some("Space skips".to_string()),
-        _ if g.level.number == 0 => resume,
         _ => g.message.as_ref().map(|(s, _)| s.clone()),
     };
     if let Some(m) = msg {

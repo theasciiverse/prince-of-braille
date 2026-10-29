@@ -19,8 +19,8 @@ const PTORCHSTATE: [u8; 2] = [1, 6];
 pub enum After {
     /// start this level (LoadNextLevel)
     Level(u8),
-    /// the opening scene, then a new game on level 1
-    NewGame,
+    /// the scene in the title's story; the title goes on after it
+    Attract,
     TimeUp,
     Won,
 }
@@ -433,11 +433,7 @@ impl Game {
                     self.time_request = 1;
                 }
             }
-            After::NewGame => {
-                self.start_level(1, false);
-                // StartGame: the danger theme on level 1
-                self.cuesong(crate::music::Song::Danger);
-            }
+            After::Attract => self.demo_over = true,
             After::TimeUp => {
                 self.phase = Phase::TimeUp;
                 self.show_message("TIME HAS EXPIRED".into(), u32::MAX);
@@ -495,9 +491,9 @@ mod tests {
     }
 
     #[test]
-    fn the_opening_scene_turns_the_hourglass_and_starts_level_1() {
+    fn the_opening_scene_turns_the_hourglass() {
         let mut g = Game::new(1);
-        g.playcut(0, 1, After::NewGame);
+        g.playcut(0, 1, After::Attract);
         let mut saw_vizier = false;
         let mut saw_glass = false;
         for _ in 0..400 {
@@ -508,7 +504,7 @@ mod tests {
             }
         }
         assert!(saw_vizier && saw_glass);
-        assert_eq!((g.phase, g.level.number), (Phase::Playing, 1));
+        assert!(g.cut.is_none() && g.demo_over);
     }
 
     #[test]

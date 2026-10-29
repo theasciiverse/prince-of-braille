@@ -3,7 +3,8 @@
 
 Reads the PrinceJS archive and writes:
 
-  assets/dos/*.png       the sprite sheets (tiles, characters, swords, flames)
+  assets/dos/*.png       the sprite sheets (tiles, characters, swords, flames,
+                         the title and story screens)
   src/gen/dos_atlas.rs   each sheet's frames (name, x, y, w, h), sorted by
                          name; the DOS sword table; each level's guard
                          colours by room
@@ -22,7 +23,7 @@ DEFAULT_REF = os.path.join(HERE, "..", "..", "..", "references", "Prince of Pers
 PREFIX = "PrinceJS-master/assets/"
 SHEETS = ["dungeon", "palace", "general", "kid", "shadow", "skeleton", "fatguard", "jaffar", "sword", "princess", "vizier", "mouse"] + [
     f"guard-{i}" for i in range(1, 8)
-]
+] + ["title"]
 
 
 def ident(name):

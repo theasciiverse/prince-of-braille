@@ -321,6 +321,24 @@ drawing bug), enable_freeze_time_during_end_music (nothing here waits
 for the music), fix_gate_drawing_bug and fix_bigpillar_climb (off in
 SDLPoP too). enable_crouch_after_climbing waits for the controls work.
 
+**The title and the end** (2026-10-29, `src/title.rs`): as the DOS
+version, from SDLPoP show_title, end_sequence and expired, with PrinceJS's
+pictures (its `title` sheet) and the prologue and epilogue songs. Started
+without a level the game opens at the title: the palace fading in with
+the main theme, "Broderbund presents", "a game by Jordan Mechner", the
+name until the theme ends; "In the Sultan's absence" with the second
+theme; the vizier in the princess's room (cut 0); "Marry Jaffar", the
+name, the credits; the demo; and round again. Any key starts level 1 with
+the danger theme (the vizier scene is part of the title, as in DOS), Esc
+quits. Hold times are SDLPoP's 60ths of a second at our 12 frames;
+where it waits for a song, the song's length. The embrace is followed by
+"The tyrant Jaffar" and the epilogue, then the title; time running out
+plays the tragic scene, then the title. Below 50 rows the DOS lettering
+can't be read, so the text screens write their words as terminal text in
+the screen's panel (the frame stays the DOS art). `--demo` alone still
+plays the demo and quits (the catalog preview). `POB_TITLE=opening|story|
+epilogue` with `--dump` shows the title's frames.
+
 **Saving** (2026-10-29, `src/save.rs`): as MISC.S DOSAVEGAME and
 TOPCTRL.S ResumeGame. A save holds the level, origstrength (the kid's
 strength when the level began), FrameCount and NextTimeMsg; resuming
@@ -329,8 +347,8 @@ starts that level from its beginning and shows the time left. Levels 3 to
 so instead of the Apple's splat. Ctrl-G saves as the original did, and
 reaching a level saves by itself (the player wins: it is what pressing
 Ctrl-G on the level's first frame would save, so nothing gets easier).
-Ctrl-L resumes from the opening scene, the demo, time up or the end, as
-SDLPoP's from the title; the status line offers it there. The file is
+Ctrl-L resumes from the title, its story or the demo, as SDLPoP's from
+the title; the status line offers it there. The file is
 `$XDG_DATA_HOME/prince-of-braille/save` (`~/.local/share`, `%APPDATA%`),
 plain `key value` lines. With origstrength the port also got the
 original's restart right: dying takes back a life potion drunk on that

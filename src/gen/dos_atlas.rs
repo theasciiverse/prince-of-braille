@@ -1475,6 +1475,19 @@ pub static GUARD_7: Frames = &[
     ("guard-7-9", 2, 585, 41, 35),
 ];
 
+pub static TITLE: Frames = &[
+    ("author", 2, 2, 122, 30),
+    ("copyright", 256, 2, 224, 11),
+    ("credits", 324, 271, 320, 200),
+    ("game_name", 482, 2, 272, 65),
+    ("in_the_absence", 2, 271, 320, 200),
+    ("main_background", 646, 69, 320, 200),
+    ("marry_jaffar", 324, 69, 320, 200),
+    ("presents", 126, 2, 128, 47),
+    ("prince", 2, 69, 320, 200),
+    ("the_tyrant", 646, 271, 320, 200),
+];
+
 /// The DOS sword table (Fsword 1-based): image, dx, dy.
 pub static SWORDTAB: [(u8, i8, i8); 50] = [
     (1, 0, -9),

@@ -6,6 +6,10 @@ use crate::game::*;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Song {
+    /// the title's main theme
+    PrologueA,
+    /// "In the Sultan's absence"
+    PrologueB,
     Princess,
     Jaffar,
     Heartbeat,
@@ -23,11 +27,15 @@ pub enum Song {
     MeetJaffar,
     JaffarDead,
     Embrace,
+    /// the end, after the embrace
+    Epilogue,
 }
 
 impl Song {
     pub fn mp3(self) -> &'static [u8] {
         match self {
+            Song::PrologueA => include_bytes!("../assets/music/01_Prologue_A.mp3"),
+            Song::PrologueB => include_bytes!("../assets/music/02_Prologue_B.mp3"),
             Song::Princess => include_bytes!("../assets/music/03_Princess.mp3"),
             Song::Jaffar => include_bytes!("../assets/music/04_Jaffar.mp3"),
             Song::Heartbeat => include_bytes!("../assets/music/05_Heartbeat.mp3"),
@@ -45,6 +53,7 @@ impl Song {
             Song::MeetJaffar => include_bytes!("../assets/music/19_Jaffar_2.mp3"),
             Song::JaffarDead => include_bytes!("../assets/music/20_Jaffar_Dead.mp3"),
             Song::Embrace => include_bytes!("../assets/music/21_Embrace.mp3"),
+            Song::Epilogue => include_bytes!("../assets/music/22_Epilogue.mp3"),
         }
     }
 }
