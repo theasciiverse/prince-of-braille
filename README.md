@@ -38,6 +38,10 @@ pixel of the DOS art.
   mode; with the Apple picture, `c` colour theme (dusk, phosphor, amber,
   classic) and `f` scale
 - Space skips a scene in the princess's room; Esc twice quits
+- A gamepad works too, mapped as SDLPoP maps one: the d-pad or either
+  stick to move (a stick's diagonals jump to the side), Y up, A down, X or
+  a trigger (or a shoulder button) for the button; Start pauses and Back
+  quits. At the title any button plays
 
 ## Saving
 
@@ -63,7 +67,7 @@ the game by itself.
 
 Prince of Persia is by Jordan Mechner, who released the Apple II source
 code in 2012. The level layouts and the Apple II picture come from that
-source. The art, the princess's room and the music are the DOS version's,
-from PrinceJS (github.com/oklemenz/PrinceJS).
+source. The art, the princess's room, the music and the sound effects are the
+DOS version's, from PrinceJS (github.com/oklemenz/PrinceJS).
 
 Port by Asciiverse, MIT licensed (see LICENSE).

@@ -98,12 +98,40 @@ impl App {
             KeyCode::Char('l') if ctrl => handle(self, Cmd::LoadGame),
             KeyCode::Char('m') | KeyCode::F(8) => handle(self, Cmd::Mute),
             KeyCode::Modifier(_) => {}
-            // a key in the end goes on to the title, as in SDLPoP
-            _ if self.title.as_ref().is_some_and(|t| t.part == title::Part::Epilogue) => {
-                self.show_title(title::Part::Opening)
-            }
-            _ => self.play(1),
+            _ => self.attract_any(),
         }
+    }
+
+    /// Any key (or pad button) at the title, in its story or the demo.
+    fn attract_any(&mut self) {
+        // a key in the end goes on to the title, as in SDLPoP
+        if self.title.as_ref().is_some_and(|t| t.part == title::Part::Epilogue) {
+            self.show_title(title::Part::Opening)
+        } else {
+            self.play(1)
+        }
+    }
+
+    /// A gamepad press outside the controls: at the title any button
+    /// plays and Back quits; in a game Start pauses, Back asks to quit,
+    /// and the others go on after a death, as Space does.
+    fn pad_press(&mut self, p: input::PadPress) {
+        use input::PadPress;
+        if self.in_attract() {
+            match p {
+                PadPress::Back => self.quit = true,
+                _ => self.attract_any(),
+            }
+            return;
+        }
+        handle(
+            self,
+            match p {
+                PadPress::Start => Cmd::Pause,
+                PadPress::Back => Cmd::AskQuit,
+                PadPress::Face => Cmd::Continue,
+            },
+        );
     }
 
     /// The next step of the title, its story, the demo and the end.
@@ -220,6 +248,8 @@ fn run(terminal: &mut DefaultTerminal, level: Option<u8>, exact: bool, theme: th
     // a game started on a level isn't saved until it reaches another
     let mut saved_level = level.unwrap_or(0);
     let mut input = Input::new(exact);
+    input.open_pad();
+    log::info!("gamepad {:?}", input.pad_name);
     let tick = Duration::from_secs(1) / FPS;
     let mut next = Instant::now() + tick;
     let mut last_snapshot = Instant::now();
@@ -236,6 +266,11 @@ fn run(terminal: &mut DefaultTerminal, level: Option<u8>, exact: bool, theme: th
                 }
                 input.on_key(k, Instant::now());
             }
+        }
+        input.poll_pad((app.game.kid.action, app.game.kid.posn));
+        for p in std::mem::take(&mut input.pad_presses) {
+            log::debug!("pad {p:?}");
+            app.pad_press(p);
         }
         for cmd in std::mem::take(&mut input.cmds) {
             handle(&mut app, cmd);
@@ -597,7 +632,9 @@ fn draw_dos(buf: &mut ratatui::buffer::Buffer, area: Rect, app: &App, input: &In
 
 fn status_note(app: &App, input: &Input, view: &str) -> String {
     let mut note = view.to_string();
-    if input.mode == input::Mode::Timing {
+    if input.pad_name.is_some() {
+        note.push_str(" pad");
+    } else if input.mode == input::Mode::Timing {
         note.push_str(" keys:timing");
     }
     if app.audio.muted {

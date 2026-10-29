@@ -1,4 +1,4 @@
-//! Keyboard to "joystick".
+//! Keyboard and gamepad to "joystick".
 //!
 //! Prince of Persia needs held keys: running is "forward held", grabbing a
 //! ledge is "button held". Two tiers:
@@ -10,6 +10,12 @@
 //!    repeat a tap and a hold look the same, so a lone press holds for
 //!    about one repeat delay. This is close to the Apple II itself, whose
 //!    keyboard also only knew "the last key, and is it still down".
+//!
+//! A gamepad (the `gamepad` feature, on by default) is always exact. It is
+//! mapped as SDLPoP maps one: the d-pad or either stick moves, Y is up, A
+//! is down, X or a trigger is the button (Shift), and Start or Back pause.
+//! Here Start pauses and Back asks to quit, as Esc does, and the
+//! shoulder buttons are the button too, for pads without triggers.
 
 use crate::game::Controls;
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers, ModifierKeyCode};
@@ -85,8 +91,73 @@ pub enum Cmd {
     LoadGame,
 }
 
+/// A gamepad press outside the game's controls: main decides what it does
+/// (at the title any of them plays).
+#[derive(Clone, Copy, PartialEq, Debug)]
+#[cfg_attr(not(feature = "gamepad"), allow(dead_code))]
+pub enum PadPress {
+    /// a face button, a trigger or a shoulder
+    Face,
+    Start,
+    Back,
+}
+
+/// SDLPoP's joystick_threshold, 8000 of 32767.
+#[cfg(feature = "gamepad")]
+const STICK: f32 = 8000.0 / 32767.0;
+
+/// Only pads with an SDL mapping: gilrs also lists things like
+/// accelerometers and keyboards as gamepads (POB_ANY_PAD=1 takes any).
+#[cfg(feature = "gamepad")]
+fn usable_pad(p: &gilrs::Gamepad) -> bool {
+    p.mapping_source() == gilrs::MappingSource::SdlMappings || std::env::var("POB_ANY_PAD").is_ok_and(|v| v == "1")
+}
+
+/// SDLPoP get_joystick_state: a stick's direction from its angle, in
+/// overlapping sectors so the diagonals give both. `keep_x` and `keep_y`
+/// are SDLPoP's two tweaks: pushing straight up keeps a running jump
+/// running, and easing off a crouch's landing doesn't stand him up.
+#[cfg(feature = "gamepad")]
+fn stick(x: f32, y: f32, prev: [i8; 2], running_jump: bool, crouch_landing: bool) -> [i8; 2] {
+    if x * x + y * y < STICK * STICK {
+        return [0, 0];
+    }
+    // degrees: 0 right, 90 up (gilrs' y points up, SDL's down)
+    let a = y.atan2(x).to_degrees();
+    let mut out = prev;
+    out[0] = if a.abs() < 60.0 {
+        1
+    } else if a.abs() > 120.0 {
+        -1
+    } else if a > 0.0 && running_jump {
+        prev[0]
+    } else {
+        0
+    };
+    out[1] = if a > 30.0 && a < 150.0 {
+        -1
+    } else if a < -35.0 && a > -145.0 {
+        1
+    } else if a < 0.0 && crouch_landing {
+        prev[1]
+    } else {
+        0
+    };
+    out
+}
+
 pub struct Input {
     pub mode: Mode,
+    #[cfg(feature = "gamepad")]
+    gilrs: Option<gilrs::Gilrs>,
+    /// the gamepad in use, if any
+    pub pad_name: Option<String>,
+    /// the pad's controls: x, y, button
+    pad: (i8, i8, bool),
+    /// the two sticks' directions, kept between frames for SDLPoP's tweaks
+    #[cfg_attr(not(feature = "gamepad"), allow(dead_code))]
+    sticks: [[i8; 2]; 2],
+    pub pad_presses: Vec<PadPress>,
     left: Hold,
     right: Hold,
     up: Hold,
@@ -110,6 +181,103 @@ impl Input {
             last_x: 0,
             last_y: 0,
             cmds: Vec::new(),
+            #[cfg(feature = "gamepad")]
+            gilrs: None,
+            pad_name: None,
+            pad: (0, 0, false),
+            sticks: [[0; 2]; 2],
+            pad_presses: Vec::new(),
+        }
+    }
+
+    pub fn open_pad(&mut self) {
+        #[cfg(feature = "gamepad")]
+        match gilrs::Gilrs::new() {
+            Ok(g) => {
+                let all: Vec<_> = g.gamepads().map(|(_, p)| (p.name().to_string(), usable_pad(&p))).collect();
+                log::info!("gamepads (name, used): {all:?}");
+                self.pad_name = all.into_iter().find(|(_, used)| *used).map(|(n, _)| n);
+                self.gilrs = Some(g);
+            }
+            Err(e) => log::warn!("gamepad support unavailable: {e}"),
+        }
+    }
+
+    /// Drain the gamepad's events and read its controls, once a frame.
+    /// `kid` is the kid's action and frame, for SDLPoP's stick tweaks.
+    #[cfg_attr(not(feature = "gamepad"), allow(unused_variables))]
+    pub fn poll_pad(&mut self, kid: (u8, u8)) {
+        #[cfg(feature = "gamepad")]
+        {
+            use gilrs::{Axis, Button, EventType};
+            let Some(g) = &mut self.gilrs else { return };
+            let mut used = None;
+            while let Some(ev) = g.next_event() {
+                let pad = g.gamepad(ev.id);
+                if !usable_pad(&pad) {
+                    continue;
+                }
+                match ev.event {
+                    EventType::Connected => {
+                        self.pad_name = Some(pad.name().to_string());
+                        log::info!("gamepad connected: {:?}", self.pad_name);
+                    }
+                    EventType::Disconnected => {
+                        log::info!("gamepad disconnected");
+                        self.pad_name = None;
+                    }
+                    EventType::ButtonPressed(b, _) => {
+                        log::debug!("pad press {b:?}");
+                        let p = match b {
+                            Button::Start => Some(PadPress::Start),
+                            Button::Select => Some(PadPress::Back),
+                            Button::South
+                            | Button::East
+                            | Button::North
+                            | Button::West
+                            | Button::LeftTrigger
+                            | Button::RightTrigger
+                            | Button::LeftTrigger2
+                            | Button::RightTrigger2 => Some(PadPress::Face),
+                            _ => None,
+                        };
+                        self.pad_presses.extend(p);
+                    }
+                    EventType::ButtonReleased(b, _) => log::debug!("pad release {b:?}"),
+                    _ => {}
+                }
+                used = Some(ev.id);
+            }
+            // the pad last heard from, or the first usable one
+            let id = used.or_else(|| g.gamepads().find(|(_, p)| usable_pad(p)).map(|(id, _)| id));
+            let Some(pad) = id.map(|id| g.gamepad(id)) else {
+                self.pad = (0, 0, false);
+                return;
+            };
+            let on = |b: Button| pad.is_pressed(b);
+            let axis = |a: Axis| pad.axis_data(a).map_or(0.0, |d| d.value());
+            let trigger = |b: Button| pad.button_data(b).is_some_and(|d| d.value() > STICK);
+            let (action, posn) = kid;
+            let running_jump = action == 1;
+            let crouch_landing = (108..=112).contains(&posn);
+            self.sticks[0] =
+                stick(axis(Axis::LeftStickX), axis(Axis::LeftStickY), self.sticks[0], running_jump, crouch_landing);
+            self.sticks[1] =
+                stick(axis(Axis::RightStickX), axis(Axis::RightStickY), self.sticks[1], running_jump, crouch_landing);
+            let [l, r] = self.sticks;
+            let left = l[0] < 0 || r[0] < 0 || on(Button::DPadLeft);
+            let right = l[0] > 0 || r[0] > 0 || on(Button::DPadRight);
+            let up = l[1] < 0 || r[1] < 0 || on(Button::DPadUp) || on(Button::North);
+            let down = l[1] > 0 || r[1] > 0 || on(Button::DPadDown) || on(Button::South);
+            let btn = on(Button::West)
+                || on(Button::LeftTrigger)
+                || on(Button::RightTrigger)
+                || trigger(Button::LeftTrigger2)
+                || trigger(Button::RightTrigger2);
+            // SDLPoP: left wins over right, up over down
+            let x = if left { -1 } else if right { 1 } else { 0 };
+            let y = if up { -1 } else if down { 1 } else { 0 };
+            self.pad = (x, y, btn);
         }
     }
 
@@ -218,7 +386,12 @@ impl Input {
             (true, true) => self.last_y,
             _ => 0,
         };
-        Controls { x, y, btn: self.btn.held(now, m) }
+        let (px, py, pb) = self.pad;
+        Controls {
+            x: if px != 0 { px } else { x },
+            y: if py != 0 { py } else { y },
+            btn: pb || self.btn.held(now, m),
+        }
     }
 }
 
@@ -260,5 +433,25 @@ mod tests {
         assert_eq!(i.controls(t0 + Duration::from_secs(5)).y, -1);
         i.on_key(KeyEvent::new_with_kind(KeyCode::Up, KeyModifiers::NONE, KeyEventKind::Release), t0);
         assert_eq!(i.controls(t0).y, 0);
+    }
+
+    #[cfg(feature = "gamepad")]
+    #[test]
+    fn the_stick_reads_as_sdlpop_reads_it() {
+        let d = std::f32::consts::PI / 180.0;
+        let at = |deg: f32| (deg * d).cos();
+        let at_y = |deg: f32| (deg * d).sin();
+        let s = |deg: f32, prev: [i8; 2], rj: bool| stick(at(deg), at_y(deg), prev, rj, false);
+        assert_eq!(s(0.0, [0, 0], false), [1, 0]);
+        assert_eq!(s(90.0, [0, 0], false), [0, -1]);
+        // up-left is a diagonal jump
+        assert_eq!(s(135.0, [0, 0], false), [-1, -1]);
+        // down's sector is narrower: 30 below level is still just right
+        assert_eq!(s(-32.0, [0, 0], false), [1, 0]);
+        // straight up in a running jump keeps him running
+        assert_eq!(s(90.0, [1, 0], true), [1, -1]);
+        assert_eq!(s(90.0, [1, 0], false), [0, -1]);
+        // the dead zone
+        assert_eq!(stick(0.1, 0.1, [1, 1], false, false), [0, 0]);
     }
 }

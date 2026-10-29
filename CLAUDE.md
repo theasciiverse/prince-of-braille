@@ -118,7 +118,7 @@ original 6502 routines, run on the original data:
 | `src/game.rs` | TOPCTRL.S, AUTO.S | frame loop (NextFrame order: DoKid, DoShad, CHECKSTRIKE, ...), the Char/Kid/Shad/Op buffers, screen cuts, timer, death, level progression |
 | `src/guard.rs` | AUTO.S, MISC.S, TOPCTRL.S | guards placed from the level's INFO tables, guard AI (GuardProg, EnGarde, GenFight, the per-program strike/block/advance probabilities), sword contact (CHECKSTRIKE/CHECKSTAB/STABCHAR), strength meters (DECSTR, chgmeters), guards left behind or following you between screens, the skeleton, the shadowman's scripted appearances, the mouse |
 | `src/render.rs` | | terminal output (below) |
-| `src/sound.rs` | SOUND.S | the speaker effects, synthesised from `tone`'s loop timings, played with rodio |
+| `src/sound.rs` | | the DOS sound effects, played with rodio (below) |
 | `src/input.rs` | SPECIALK.S | keys to joystick + clr flags |
 
 Variable and routine names follow the source, and byte arithmetic wraps the
@@ -156,6 +156,18 @@ level, `p` pause, Ctrl-G save, Ctrl-L resume a saved game, `v` DOS art or Apple 
 colour theme and `f` scale (Apple picture), `m` or F8
 sound on/off (`--mute` starts without sound), Space skips a princess
 scene, Esc Esc quit.
+
+**Gamepad** (2026-10-29, `gamepad` feature, on by default, gilrs as in
+the other Asciiverse games): SDLPoP's mapping: d-pad or either stick
+(SDLPoP's angle sectors and 8000 dead zone, with its two tweaks: straight
+up keeps a running jump running, easing off a crouch landing doesn't stand
+him up), Y up, A down, X or a trigger the button, plus the shoulders for
+pads without triggers. SDLPoP's Start and Back both pause; here Start
+pauses and Back asks to quit as Esc does. Face buttons go on after a death
+like Space, and at the title any button plays. A pad is exact, so it never
+needs the key-repeat guessing; the status line says `pad`. Only pads with
+an SDL mapping are used (`POB_ANY_PAD=1` takes any), which keeps a
+SpaceMouse from counting as one.
 
 **Debugging:** `RUST_LOG=debug prince-of-braille 2>pob.log` logs every key,
 state changes and a 500 ms state snapshot. `--dump "R:12 .:6 U:1"` runs
@@ -222,14 +234,25 @@ solid lo-res colour for part of each frame on the Apple; here the black
 of the picture takes a dimmed copy of that colour for the frame instead
 of a full-screen strobe.
 
-**Sound** (2026-10-28): SOUND.S's effects (footsteps, plates, gates,
-the exit, splats, sword clashes, slicer jaws, ...) rebuilt as the Apple
-speaker made them: `tone` flips the one-bit speaker `duration` times
-with a delay loop between flips, so each effect is a square wave whose
-half-period is that loop's cycle count at 1.023 MHz. Rendered once at
-start-up and played with rodio, as in the other Asciiverse games. The
-drink and upstairs events were music cues in the original and stay
-silent.
+**Sound** (2026-10-29, replacing the Apple speaker tones of 2026-10-28):
+the DOS version's effects, 31 MP3s from PrinceJS (Unlicense) in
+`assets/sfx/`, decoded at start-up and mixed with rodio. `Sound` names
+them after SDLPoP's sound ids, and they fire where SDLPoP plays them,
+which is more often than SOUND.S did: landings (soft, medium, the crash
+of a fatal fall), the scream of a long fall (yvel 31, once per fall),
+catching a ledge, drawing the sword, a strike at the air, the kid's and
+a guard's cries when hit, loose floors rattling (SDLPoP's loose_sound
+steps, a random other take each time), gates ticking down every fourth
+step and up every second with a stop at either end, the level door, the
+skeleton waking, spikes springing, the drink, and a gate and the
+princess's door before she turns in the vizier's scene. Each effect plays
+once a frame; the exit door's long slide plays once though asked for every
+frame, as SDLPoP's non-interruptible sound does. PrinceJS's file names
+are its own guesses: the mapping goes by where PrinceJS plays each file
+(its "Falling floor lands" is the fall scream, checked: a steady 370 Hz
+voice). Not used: "Hard landing splat" (PrinceJS doesn't either) and
+"Beep" (SDLPoP's blinking "Press Button to Continue", which the status
+line here doesn't have).
 
 **The princess's room** (2026-10-28): `src/cut.rs` plays SUBS.S's
 scenes (PlayCut0-8) on the game's own character buffers and animchar:
