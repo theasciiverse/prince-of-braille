@@ -12,6 +12,7 @@
 mod apple;
 mod bg;
 mod cut;
+mod dos;
 mod coll;
 mod ctrl;
 mod game;
@@ -44,6 +45,8 @@ struct App {
     game: Game,
     screen: Screen,
     glyphs: Glyphs,
+    /// draw the Apple picture instead of the DOS art (`v`)
+    apple: bool,
     theme: theme::Theme,
     /// 0 = fit automatically, else forced 1 or 2
     scale: i32,
@@ -104,6 +107,7 @@ fn run(terminal: &mut DefaultTerminal, level: u8, exact: bool, theme: theme::The
         game: new_game(level),
         screen: Screen::default(),
         glyphs: Glyphs::Hybrid,
+        apple: false,
         theme,
         scale: 0,
         paused: false,
@@ -207,7 +211,16 @@ fn dump_frames(level: u8, script: &str, theme: theme::Theme) {
     let mut scr = Screen::default();
     // POB_SCALE=2: the half-size picture, as on a small terminal
     let scale = std::env::var("POB_SCALE").ok().and_then(|v| v.parse().ok()).filter(|s| *s == 2).unwrap_or(1);
-    let (w, h) = render::cells_needed(scale);
+    // POB_VIEW=apple: the Apple picture; else the DOS art in POB_SIZE
+    // cells (WxH, the status line below), by default the Apple's size
+    let apple_view = std::env::var("POB_VIEW").is_ok_and(|v| v == "apple");
+    let (w, h) = match std::env::var("POB_SIZE").ok().and_then(|v| {
+        let (a, b) = v.split_once('x')?;
+        Some((a.parse().ok()?, b.parse::<u16>().ok()?.saturating_sub(1)))
+    }) {
+        Some(size) if !apple_view => size,
+        _ => render::cells_needed(scale),
+    };
     for tok in script.split_whitespace() {
         let (keys, n) = tok.split_once(':').unwrap_or((tok, "1"));
         let n: u32 = n.parse().unwrap_or(1);
@@ -237,7 +250,12 @@ fn dump_frames(level: u8, script: &str, theme: theme::Theme) {
             let _ = std::fs::write(format!("{dir}/{:03}.ppm", g.ticks), out);
         }
         let mut buf = ratatui::buffer::Buffer::empty(Rect::new(0, 0, w, h + 1));
-        render::paint_screen(&mut buf, Rect::new(0, 0, w, h), &scr, scale, Glyphs::Hybrid, theme, g.level.palace() || g.cut.is_some(), g.cut.as_ref().map(room::backdrop).as_ref());
+        if apple_view || g.cut.is_some() {
+            render::paint_screen(&mut buf, Rect::new(0, 0, w, h), &scr, scale, Glyphs::Hybrid, theme, g.level.palace() || g.cut.is_some(), g.cut.as_ref().map(room::backdrop).as_ref());
+        } else {
+            let r = render::dos_fit(Rect::new(0, 0, w, h));
+            render::paint_dos(&mut buf, r, &dos::picture(&g), Glyphs::Hybrid);
+        }
         render::paint_status(&mut buf, Rect::new(0, h, w, 1), &g, "");
         let k = &g.kid;
         println!(
@@ -331,6 +349,7 @@ fn handle(app: &mut App, cmd: Cmd) {
             g.start_level(n, true);
         }
         Cmd::Glyphs => app.glyphs = app.glyphs.next(),
+        Cmd::View => app.apple = !app.apple,
         Cmd::Theme => {
             app.theme = app.theme.next();
             theme::save(app.theme);
@@ -363,6 +382,10 @@ fn draw(f: &mut ratatui::Frame, app: &mut App, input: &Input) {
             }
         }
     }
+    if !app.apple && app.game.cut.is_none() {
+        draw_dos(buf, area, app, input);
+        return;
+    }
     let (w1, h1) = render::cells_needed(1);
     let scale = match app.scale {
         0 => {
@@ -387,7 +410,26 @@ fn draw(f: &mut ratatui::Frame, app: &mut App, input: &Input) {
     if let Some(c) = app.game.flash() {
         render::paint_flash(buf, Rect::new(ox, oy, w, h), c);
     }
-    let mut note = format!("{} {} {}x", app.theme.name(), app.glyphs.name(), scale);
+    let note = status_note(app, input, &format!("{} {} {}x", app.theme.name(), app.glyphs.name(), scale));
+    render::paint_status(buf, Rect::new(ox, oy + h, w, 1), &app.game, &note);
+    confirm_quit(buf, app, ox, oy, w, h);
+}
+
+/// The game in the DOS art, as large as the window allows.
+fn draw_dos(buf: &mut ratatui::buffer::Buffer, area: Rect, app: &App, input: &Input) {
+    let pic = dos::picture(&app.game);
+    let r = render::dos_fit(Rect::new(area.x, area.y, area.width, area.height.saturating_sub(1)));
+    render::paint_dos(buf, r, &pic, app.glyphs);
+    if let Some(c) = app.game.flash() {
+        render::paint_flash(buf, r, c);
+    }
+    let note = status_note(app, input, app.glyphs.name());
+    render::paint_status(buf, Rect::new(r.x, r.y + r.height, r.width, 1), &app.game, &note);
+    confirm_quit(buf, app, r.x, r.y, r.width, r.height);
+}
+
+fn status_note(app: &App, input: &Input, view: &str) -> String {
+    let mut note = view.to_string();
     if input.mode == input::Mode::Timing {
         note.push_str(" keys:timing");
     }
@@ -397,7 +439,10 @@ fn draw(f: &mut ratatui::Frame, app: &mut App, input: &Input) {
     if app.paused {
         note.push_str(" PAUSED");
     }
-    render::paint_status(buf, Rect::new(ox, oy + h, w, 1), &app.game, &note);
+    note
+}
+
+fn confirm_quit(buf: &mut ratatui::buffer::Buffer, app: &App, ox: u16, oy: u16, w: u16, h: u16) {
     if app.confirm_quit {
         let m = " Quit? Esc again to quit, any other key to stay ";
         let mx = ox + w.saturating_sub(m.len() as u16) / 2;

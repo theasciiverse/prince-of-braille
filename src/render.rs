@@ -245,6 +245,78 @@ pub fn paint_screen(buf: &mut Buffer, area: Rect, scr: &Screen, scale: i32, glyp
     }
 }
 
+/// Rows a DOS pixel takes per column: its 320 x 200 screen filled a 4:3
+/// monitor, so its pixels were 1.2 times as tall as wide; Braille dots
+/// are about square.
+const DOS_ASPECT: f32 = 1.2;
+
+/// The cells the DOS picture takes in `area`: as large as fits, centred.
+pub fn dos_fit(area: Rect) -> Rect {
+    let (dw, dh) = (area.width as f32 * 2.0, area.height as f32 * 4.0);
+    let s = (dw / crate::dos::W as f32).min(dh / (crate::dos::H as f32 * DOS_ASPECT));
+    let w = ((crate::dos::W as f32 * s / 2.0).floor() as u16).min(area.width);
+    let h = ((crate::dos::H as f32 * DOS_ASPECT * s / 4.0).floor() as u16).min(area.height);
+    Rect::new(area.x + (area.width - w) / 2, area.y + (area.height - h) / 2, w, h)
+}
+
+/// Paint the DOS picture into `area` (from dos_fit), each dot the average
+/// of the pixels under it; a dot is a character's when any of them is.
+pub fn paint_dos(buf: &mut Buffer, area: Rect, pic: &crate::dos::Pic, glyphs: Glyphs) {
+    let (pw, ph) = (crate::dos::W, crate::dos::H);
+    let (dw, dh) = (area.width as i32 * 2, area.height as i32 * 4);
+    let span = |d: i32, n: i32, of: i32| (d * of / n, ((d + 1) * of / n).max(d * of / n + 1).min(of));
+    let dot = |x: i32, y: i32| -> (bool, [u8; 3]) {
+        let (x0, x1) = span(x, dw, pw);
+        let (y0, y1) = span(y, dh, ph);
+        let mut kid = false;
+        let (mut kc, mut bc) = (Vec::new(), Vec::new());
+        for py in y0..y1 {
+            for px in x0..x1 {
+                let i = (py * pw + px) as usize;
+                if pic.kid[i] {
+                    kid = true;
+                    kc.push(pic.col[i]);
+                } else {
+                    bc.push(pic.col[i]);
+                }
+            }
+        }
+        if kid {
+            (true, mean(kc.into_iter()))
+        } else {
+            (false, mean(bc.into_iter()))
+        }
+    };
+    for cy in 0..area.height {
+        for cx in 0..area.width {
+            let mut kid = 0u8;
+            let mut dots = [[0u8; 3]; 8];
+            let mut kid_cols = Vec::new();
+            for r in 0..4 {
+                for c in 0..2 {
+                    let (k, a) = dot(cx as i32 * 2 + c as i32, cy as i32 * 4 + r as i32);
+                    if k {
+                        kid |= bit(c, r);
+                        kid_cols.push(a);
+                    } else {
+                        dots[r * 2 + c] = a;
+                    }
+                }
+            }
+            let (mut ch_, mut style) = cell(kid, &dots, glyphs);
+            if kid != 0 {
+                style = style.fg(color(mean(kid_cols.into_iter())));
+            }
+            if ch_ == '\0' {
+                ch_ = ' ';
+            }
+            if let Some(cell) = buf.cell_mut((area.x + cx, area.y + cy)) {
+                cell.set_char(ch_).set_style(style);
+            }
+        }
+    }
+}
+
 /// Split a cell's dots into two colour groups (2-means, seeded with the
 /// brightest and darkest dot). Returns (fg, bg, mask of fg dots).
 fn two_colors(dots: &[[u8; 3]; 8]) -> ([u8; 3], [u8; 3], u8) {

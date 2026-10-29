@@ -73,6 +73,8 @@ pub enum Cmd {
     NextLevel,
     PrevLevel,
     Glyphs,
+    /// the DOS art or the Apple picture
+    View,
     Scale,
     Pause,
     Theme,
@@ -176,6 +178,7 @@ impl Input {
             KeyCode::Char(']') | KeyCode::Char('n') if fresh => self.cmds.push(Cmd::NextLevel),
             KeyCode::Char('[') | KeyCode::Char('b') if fresh => self.cmds.push(Cmd::PrevLevel),
             KeyCode::Char('g') if fresh => self.cmds.push(Cmd::Glyphs),
+            KeyCode::Char('v') if fresh => self.cmds.push(Cmd::View),
             KeyCode::Char('f') if fresh => self.cmds.push(Cmd::Scale),
             KeyCode::Char('p') if fresh => self.cmds.push(Cmd::Pause),
             KeyCode::Char('c') if fresh => self.cmds.push(Cmd::Theme),
