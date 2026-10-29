@@ -299,8 +299,27 @@ guards, levels); how it looks, sounds and handles is designed for the
 terminal, and where the two disagree the player wins. Bugs in the
 original that hurt play get fixed, as SDLPoP's optional fixes do. Plan,
 in order: the room (done), the DOS renderer (done, below; David chose
-the DOS art over new terminal art), the original's bugs, and controls
-that work from key repeat.
+the DOS art over new terminal art), the original's bugs (done, below),
+and controls that work from key repeat.
+
+**The original's bugs** (2026-10-29): SDLPoP 1.16's fixes, checked one
+by one against our port and applied where the bug is in the Apple code
+too, each commented at its place: fix_two_coll_bug (COLLISIONS checks
+both barrier edges), fix_infinite_down_bug (CHECKSPIKES stops one row
+below the screen), fix_jump_distance_at_edge (DOJUMPHIGH),
+fix_painless_fall_on_guard (FIRSTGUARD), fix_wall_bump_triggers_tile_below
+and fix_stand_on_thin_air (byte patches to bumpfall and standup in
+`seq::patched`, plus CHECKFLOOR on the stand-up frames),
+fix_press_through_closed_gates (CHECKPRESS rereads his block),
+fix_grab_falling_speed (GRABSPEED 30), fix_skeleton_chomper_blood,
+fix_move_after_drink (GENCTRL), fix_guard_following_through_closed_gates
+(cutguards), fix_safe_landing_on_spikes (HITFLR), and fix_gate_sounds,
+which came with the lowering-gate tick (SUBS.S ADDLOWERSOUND) the port
+had left out. Not taken: fix_edge_distance_check_when_climbing (the Apple
+DOJUMPHANG never had the extra check), fix_loose_left_of_potion (a DOS
+drawing bug), enable_freeze_time_during_end_music (nothing here waits
+for the music), fix_gate_drawing_bug and fix_bigpillar_climb (off in
+SDLPoP too). enable_crouch_after_climbing waits for the controls work.
 
 **The DOS renderer** (2026-10-29, `src/dos.rs`): the game is drawn with
 the DOS version's art from PrinceJS (Unlicense; `tools/dos_art.py` copies

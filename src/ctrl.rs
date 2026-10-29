@@ -9,10 +9,13 @@ use crate::game::*;
 use crate::level::{is_space, obj};
 use crate::seq::{seq as s, FCHECKMARK};
 
-const DEATH_VELOCITY: u8 = 33;
-const OOF_VELOCITY: u8 = 22;
+pub(crate) const DEATH_VELOCITY: u8 = 33;
+pub(crate) const OOF_VELOCITY: u8 = 22;
 const GRABREACH: u8 = (-8i8) as u8;
-const GRABSPEED: u8 = 32;
+/// no grabbing a ledge falling this fast: 30, not the original's 32, so a
+/// bump into a wall can't catch a ledge two storeys down (SDLPoP
+/// fix_grab_falling_speed)
+const GRABSPEED: u8 = 30;
 const GRABLEAD: u8 = 25;
 const STUNTIME: u8 = 12;
 const JUMPUPREACH: u8 = 0;
@@ -143,6 +146,11 @@ impl Game {
         }
         if x == 109 {
             self.crouching();
+        }
+        // drinking: a press made meanwhile is used up, so it doesn't move
+        // him once he's done (SDLPoP fix_move_after_drink)
+        if (191..=205).contains(&x) {
+            self.clrall();
         }
     }
 
@@ -721,6 +729,12 @@ impl Game {
         if d < 4 && what == 1 {
             self.ch.x = self.addcharx(d.wrapping_sub(3));
         }
+        // three pixels from an edge he jumped up and fell (after climbing
+        // two floors and turning round); a step back keeps him on it, as
+        // SDLPoP's fix_jump_distance_at_edge does
+        if d == 3 && what == 0 {
+            self.ch.x = self.addcharx((-1i8) as u8);
+        }
         let ztemp = self.facedx(JUMPUPREACH);
         let a = self.getbasex().wrapping_add(JUMPUPANGLE).wrapping_add(ztemp);
         let bx = getblockx(a).0 as i32;
@@ -740,7 +754,9 @@ impl Game {
         match self.ch.action {
             6 | 2 => {}
             5 => {
-                if matches!(self.ch.posn, 109 | 185) {
+                // standing up from a crouch (110-119) checks the floor too,
+                // as SDLPoP's fix_stand_on_thin_air does
+                if matches!(self.ch.posn, 109 | 185 | 110..=119) {
                     self.onground();
                 }
             }
@@ -779,8 +795,11 @@ impl Game {
     fn hitflr(&mut self) {
         let by = self.ch.block_y as i8 as i32;
         self.ch.y = self.floor_y(by + 1);
+        // landing on spikes that haven't sprung yet (state 0) was safe in
+        // the original; they impale, as with SDLPoP's
+        // fix_safe_landing_on_spikes (jammed spikes stay safe)
         if self.getunderft() == obj::SPIKES {
-            if self.getspikes() != 0 {
+            if self.getspikes() != 0 || self.spec() == 0 {
                 return self.doimpale();
             }
         } else {
@@ -798,7 +817,7 @@ impl Game {
                 if !spikes && self.getunderft() == obj::SPIKES {
                     spikes = true;
                 }
-                if spikes && self.getspikes() != 0 {
+                if spikes && (self.getspikes() != 0 || self.spec() == 0) {
                     return self.doimpale();
                 }
             }
@@ -994,6 +1013,10 @@ impl Game {
             if self.frame.check & FCHECKMARK == 0 {
                 return;
             }
+            // his block from where he is now: after a closed gate has
+            // pushed him back the old one is past it, and he pressed the
+            // plate behind the gate (SDLPoP fix_press_through_closed_gates)
+            self.getbaseblock();
             self.getunderft()
         };
         match id {

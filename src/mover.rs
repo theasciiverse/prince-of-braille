@@ -154,6 +154,26 @@ impl Game {
     }
 
     /// GETSPIKES: 0 safe, 1 sprung, 2 springing (rd = the spikes).
+    /// ADDLOWERSOUND (SUBS.S): the lowering gate ticks on alternate
+    /// frames, only where it can be seen: on this screen, or in the right
+    /// column of the screen to the left (and level 3's screen 2). The
+    /// Apple tested the left screen first and gave up there, so a gate on
+    /// a screen that is its own left neighbour went silent; SDLPoP's
+    /// fix_gate_sounds tests both.
+    fn addlowersound(&mut self, state: u8, t: Trob) {
+        if state & 1 == 0 {
+            return;
+        }
+        let right_col = t.loc % 10 == 9;
+        let left = self.level.left(self.vis_scrn);
+        let seen = (self.level.number == 3 && t.scrn == 2)
+            || (t.scrn == left && right_col)
+            || (t.scrn == self.vis_scrn && !right_col);
+        if seen {
+            self.add_sound(Sound::LoweringGate);
+        }
+    }
+
     pub fn getspikes(&self) -> u8 {
         let v = self.spec();
         if v & 0x80 != 0 {
@@ -200,7 +220,10 @@ impl Game {
                     self.trigspikes();
                     break;
                 }
-                if !is_space(id) || self.rd.scrn == 0 || self.rd.scrn != self.ch.scrn {
+                // a screen that is its own lower neighbour would keep this
+                // going for ever; stop one row below the screen, as
+                // SDLPoP's fix_infinite_down_bug does
+                if !is_space(id) || self.rd.scrn == 0 || self.rd.scrn != self.ch.scrn || by > 2 {
                     break;
                 }
                 by += 1;
@@ -448,7 +471,7 @@ impl Game {
             }
             obj::SPACE => d = -1,
             obj::SLICER => self.animslicer(t, &mut state, &mut d),
-            obj::GATE => self.animgate(&mut state, &mut d),
+            obj::GATE => self.animgate(&mut state, &mut d, t),
             obj::EXIT => self.animexit(&mut state, &mut d),
             obj::FLASK => {
                 if d >= 0 {
@@ -516,7 +539,7 @@ impl Game {
         }
     }
 
-    fn animgate(&mut self, state: &mut u8, d: &mut i8) {
+    fn animgate(&mut self, state: &mut u8, d: &mut i8, t: Trob) {
         if *d < 0 {
             return;
         }
@@ -544,6 +567,8 @@ impl Game {
             if *state == 0 {
                 *d = -1;
                 self.add_sound(Sound::GateDown);
+            } else if *state < GMAXVAL {
+                self.addlowersound(*state, t);
             }
             return;
         }

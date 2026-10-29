@@ -14,9 +14,26 @@ pub fn start(n: u8) -> u16 {
     addr - seqtable::ORG
 }
 
-/// GETSEQ: the byte at `pos`.
+/// GETSEQ: the byte at `pos`, with SDLPoP's patches to the table.
 pub fn byte(pos: u16) -> u8 {
-    seqtable::SEQ.get(pos as usize).copied().unwrap_or(op::GOTO)
+    patched(pos).unwrap_or_else(|| seqtable::SEQ.get(pos as usize).copied().unwrap_or(op::GOTO))
+}
+
+/// SDLPoP's apply_seqtbl_patches, at the same places in the Apple table:
+/// - bumpfall starts in midair (3), not bumped (5): bumping a wall above a
+///   pressure plate no longer presses the plate below (fix_wall_bump_
+///   triggers_tile_below);
+/// - standing up from a crouch steps 1 forward and 4 back; he now steps 0
+///   and 3, so he no longer stands for a moment past an edge
+///   (fix_stand_on_thin_air).
+fn patched(pos: u16) -> Option<u8> {
+    let (bumpfall, standup) = (start(seq::BUMPFALL), start(seq::STANDUP));
+    match pos {
+        p if p == bumpfall + 1 => Some(3),
+        p if p == standup + 11 => Some(0),
+        p if p == standup + 16 => Some((-3i8) as u8),
+        _ => None,
+    }
 }
 
 /// A `dw` operand (absolute address) as a table index.
@@ -92,6 +109,16 @@ pub fn decode_image(f: &Frame) -> (u8, u8) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_patches_land_on_the_bytes_sdlpop_patches() {
+        let raw = |p: u16| seqtable::SEQ[p as usize];
+        let (b, u) = (start(seq::BUMPFALL), start(seq::STANDUP));
+        assert_eq!((raw(b), raw(b + 1)), (op::ACT, 5));
+        assert_eq!((raw(u + 10), raw(u + 11), raw(u + 12)), (op::CHX, 1, 114));
+        assert_eq!((raw(u + 15), raw(u + 16), raw(u + 17)), (op::CHX, (-4i8) as u8, 117));
+        assert_eq!((byte(b + 1), byte(u + 11), byte(u + 16)), (3, 0, (-3i8) as u8));
+    }
 
     #[test]
     fn stand_loops_on_frame_15() {

@@ -42,6 +42,14 @@ In terminals with the kitty keyboard protocol (kitty, WezTerm, foot,
 Ghostty and others) keys are read exactly; elsewhere a held key is
 recognised from the keyboard's repeat.
 
+## Differences from the original
+
+Bugs in the original are fixed the way SDLPoP fixes them: you can no
+longer press a plate through a closed gate, walk through a wall next to an
+open gate or a slicer, land safely on spikes that haven't sprung, fall
+onto a guard unhurt or grab a ledge two storeys down, and guards don't
+follow you through closed gates.
+
 ## Credits
 
 Prince of Persia is by Jordan Mechner, who released the Apple II source

@@ -37,6 +37,7 @@ fn tones(s: Sound) -> &'static [Tone] {
         Sound::Footstep => &[(35, 3)],
         Sound::RaisingExit => &[(40, 6)],
         Sound::RaisingGate => &[(20, 2)],
+        Sound::LoweringGate => &[(7, 8)],
         // music cues in the original, not speaker effects
         Sound::Drink | Sound::Upstairs => &[],
     }
@@ -76,7 +77,7 @@ fn render(t: &[Tone]) -> Vec<f32> {
     out
 }
 
-const ALL: [Sound; 15] = [
+const ALL: [Sound; 16] = [
     Sound::Footstep,
     Sound::SmackWall,
     Sound::Splat,
@@ -84,6 +85,7 @@ const ALL: [Sound; 15] = [
     Sound::GateDown,
     Sound::GateSlam,
     Sound::RaisingGate,
+    Sound::LoweringGate,
     Sound::RaisingExit,
     Sound::PlateDown,
     Sound::PlateUp,

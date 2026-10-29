@@ -853,6 +853,17 @@ impl Game {
         if self.ch.face == self.op.face || self.getopdist() < (-15i8) as u8 {
             return;
         }
+        // falling onto him the original bumped the kid off unhurt from
+        // any height; as SDLPoP's fix_painless_fall_on_guard, a fatal fall
+        // goes on to land and a medium one hurts
+        if self.ch.yvel >= crate::ctrl::DEATH_VELOCITY {
+            return;
+        }
+        if self.ch.yvel >= crate::ctrl::OOF_VELOCITY {
+            self.decstr(1);
+            self.add_sound(Sound::Splat);
+        }
+        self.ch.yvel = 0;
         log::debug!("bumped off the guard");
         let by = self.ch.block_y as i8 as i32;
         self.ch.y = FLOOR_Y[(by + 1).clamp(0, 4) as usize];
@@ -993,9 +1004,13 @@ impl Game {
             if guard_there {
                 false
             } else {
+                // across a closed gate he doesn't see the kid clearly and
+                // stays; the original took him along all the same (SDLPoP
+                // fix_guard_following_through_closed_gates)
+                let sees = self.enemy_alert == 2 || self.kid.sword == 2;
                 match dir {
-                    0 => sh.x < (256 - 140 - 25) as u8,
-                    1 => sh.x >= 140 + 25,
+                    0 => sh.x < (256 - 140 - 25) as u8 && sees,
+                    1 => sh.x >= 140 + 25 && sees,
                     2 => sh.block_y & 0x80 != 0,
                     _ => sh.block_y >= 3,
                 }

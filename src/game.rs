@@ -148,6 +148,7 @@ pub enum Sound {
     GateDown,
     GateSlam,
     RaisingGate,
+    LoweringGate,
     PlateDown,
     PlateUp,
     LooseCrash,

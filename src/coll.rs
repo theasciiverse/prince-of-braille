@@ -131,27 +131,23 @@ impl Game {
         if matches!(self.ch.action, 2 | 6) || (135..149).contains(&self.ch.posn) {
             return;
         }
+        // left edge of a barrier: only matters walking right
         if let Some(x) = cl {
-            // left edge of a barrier: only matters walking right
-            if self.ch.sword != 2 && self.face_left() {
-                return;
+            if (self.ch.sword == 2 || !self.face_left()) && self.checkcoll1(x) {
+                let (s, bx, by) = (self.rd.scrn, self.rd.bx, self.rd.by);
+                let d = self.getleftbar(s, bx, by).wrapping_sub(self.edges.cd_right);
+                self.collide(d, true);
             }
-            if !self.checkcoll1(x) {
-                return;
+        }
+        // the original looked at a right edge only when there was no left
+        // one, so with a barrier on each side he could pass through the
+        // second; both are checked, as SDLPoP's fix_two_coll_bug does
+        if let Some(x) = cr {
+            if (self.ch.sword == 2 || self.face_left()) && self.checkcoll1(x) {
+                let (s, bx, by) = (self.rd.scrn, self.rd.bx, self.rd.by);
+                let d = self.getrightbar(s, bx, by).wrapping_sub(self.edges.cd_left);
+                self.collide(d, false);
             }
-            let (s, bx, by) = (self.rd.scrn, self.rd.bx, self.rd.by);
-            let d = self.getleftbar(s, bx, by).wrapping_sub(self.edges.cd_right);
-            self.collide(d, true);
-        } else if let Some(x) = cr {
-            if self.ch.sword != 2 && !self.face_left() {
-                return;
-            }
-            if !self.checkcoll1(x) {
-                return;
-            }
-            let (s, bx, by) = (self.rd.scrn, self.rd.bx, self.rd.by);
-            let d = self.getrightbar(s, bx, by).wrapping_sub(self.edges.cd_left);
-            self.collide(d, false);
         }
     }
 
@@ -342,8 +338,11 @@ impl Game {
 
     /// Slice! (rd = the slicer, `bx` its block)
     fn slice(&mut self, bx: i8) {
-        let v = self.spec() | 0x80;
-        self.set_spec(v); // bloodied
+        // bloodied, unless it's the skeleton (SDLPoP fix_skeleton_chomper_blood)
+        if self.ch.id != 4 {
+            let v = self.spec() | 0x80;
+            self.set_spec(v);
+        }
         if self.ch.posn == 178 {
             return; // already cut in half
         }
