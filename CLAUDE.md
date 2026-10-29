@@ -263,6 +263,15 @@ when the vizier dies, counts down in seconds through the final minute,
 and runs out five frames after t = 0. `n` cuts the time left to 15
 minutes, as the original's level skip did (SHORTENTIME).
 
+**The demo** (2026-10-29): `--demo` plays level 0, the original's attract
+mode (SUBS.S DemoProg1, CTRL.S DemoCtrl): the kid runs, jumps two pits,
+grabs a ledge and climbs, then fights the first guard on his own (as
+guard program 10, the guard as 11). No clock and no music, as in the
+original; it ends at EndDemo or when the kid dies, and any key starts a
+new game (Esc leaves). With no input it plays the same each time, so the
+demo seeds the RNG with 5, a seed where the kid wins. It is the catalog
+preview. `POB_SEED=n` with `--dump` tries another seed.
+
 **Characters in the scene** (2026-10-28): CROPCHAR, INDEXCHAR and
 QUICKFLOOR. Each character is cropped (under a solid floor, left of a
 panel or block, climbing the stairs) and drawn with the block INDEXCHAR
@@ -294,8 +303,8 @@ So the earlier "legally clear" wording below does not match the source's
 own terms for distribution. This build embeds Mechner's original image
 tables and level blueprints (`assets/apple2/`) and data assembled from his
 tables (`src/gen/`). Studying, modifying and running it is what he
-explicitly welcomes; shipping it in the catalog is a separate question for
-David (and a natural topic for the courtesy note to Mechner). The game code
+explicitly welcomes; shipping it in the catalog was a separate question for
+David, settled on 2026-10-29: he chose it for the catalog. The game code
 itself was written from the 6502 source (PrinceJS, public domain, was only
 glanced at); SDLPoP (GPL-3) was not used.
 
@@ -329,3 +338,9 @@ Then the shadow (level 4 mirror, levels 5 and 6, the level 12 fight and
 merge), the mirror and reflection, slicers, the level 13 crumbling
 floors and the level 12 phantom bridge. Then the upside-down potion
 and screen flashes, and the sound effects.
+
+2026-10-29: version 0.9.0. The clock, CROPCHAR, the princess's room
+scenes, the DOS music, the vizier's wait for his music and the attract
+demo. Into the catalog with the demo as its preview. Left: the level 10
+panel question above, and the princess's room picture (PrinceJS has the
+DOS one).

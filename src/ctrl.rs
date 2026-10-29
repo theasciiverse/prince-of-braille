@@ -55,6 +55,10 @@ impl Game {
         if self.stunned != 0 {
             self.stunned -= 1;
         }
+        if self.level.number == 0 {
+            self.democtrl();
+            return self.genctrl();
+        }
         // getselect: raw joystick in screen terms, flags stored as if facing L
         self.joy.jstk_x = c.x;
         self.joy.jstk_y = c.y;

@@ -52,6 +52,9 @@ impl Song {
 impl Game {
     /// CUESONG: play `s` (main hands it to the audio after this frame).
     pub fn cuesong(&mut self, s: Song) {
+        if self.level.number == 0 {
+            return; // no music in the demo
+        }
         log::info!("song {s:?}");
         self.song_start = Some(s);
     }

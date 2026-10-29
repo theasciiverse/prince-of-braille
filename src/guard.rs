@@ -77,11 +77,45 @@ const SHADPOS12: ([u8; 7], u8) = ([0x0f, 0x51, 0xf0, 0x00, 0x00, 0x00, 0x00], s:
 /// Prerecorded moves for the level 5 thief: (frame, command).
 const SHADPROG5: [(u8, i8); 8] = [(0, CTR), (1, FWD), (14, CTR), (18, PRESS), (29, RELEASE), (45, BACK), (49, FWD), (255, END_PROG)];
 const END_PROG: i8 = -2;
+const END_DEMO: i8 = -1;
 const CTR: i8 = 0;
 const FWD: i8 = 1;
 const BACK: i8 = 2;
+const UP: i8 = 3;
+const DOWN: i8 = 4;
+const UPFWD: i8 = 5;
 const PRESS: i8 = 6;
 const RELEASE: i8 = 7;
+
+/// DemoProg1 (SUBS.S): the attract demo's kid, up to the fight with the
+/// first guard.
+const DEMOPROG1: [(u8, i8); 25] = [
+    (0, CTR),
+    (1, FWD),
+    (13, CTR),
+    (30, FWD), // start running...
+    (37, UPFWD), // jump 1st pit
+    (47, CTR),
+    (48, FWD), // & keep running
+    (65, CTR), // stop
+    (73, BACK), // look back...
+    (75, CTR),
+    (99, BACK),
+    (100, CTR),
+    (115, UPFWD), // jump 2nd pit
+    (128, PRESS), // & grab ledge
+    (136, UP),
+    (157, RELEASE),
+    (158, CTR),
+    (159, FWD),
+    (173, DOWN),
+    (177, CTR),
+    (178, FWD),
+    (188, CTR),
+    (193, FWD),
+    (205, CTR),
+    (233, END_DEMO),
+];
 
 impl Game {
     /// GETOPDIST: pixels Char must move forward to reach the opponent
@@ -175,6 +209,8 @@ impl Game {
                 self.guardprogram();
             }
             id if id >= 2 => self.guardprogram(),
+            // KidProg: the kid fighting in the demo
+            0 => self.guardprogram(),
             _ => self.shadowprog(),
         }
     }
@@ -238,6 +274,18 @@ impl Game {
         }
     }
 
+    /// DemoCtrl (CTRL.S): the kid in the demo plays back DemoProg1, and
+    /// once en garde fights as a guard would (programs 10 and 11).
+    pub(crate) fn democtrl(&mut self) {
+        if self.ch.sword != 0 {
+            self.guardprog = 10;
+            self.autoctrl();
+            self.guardprog = 11;
+        } else {
+            self.autoplayback(&DEMOPROG1);
+        }
+    }
+
     /// AUTOPLAYBACK: replay a prerecorded list of moves.
     fn autoplayback(&mut self, prog: &[(u8, i8)]) {
         if self.playcount >= 254 {
@@ -256,14 +304,15 @@ impl Game {
             CTR => self.dorelease(),
             FWD => self.cmd_fwd(),
             BACK => self.cmd_back(),
-            3 => self.cmd_up(),
-            4 => self.cmd_down(),
-            5 => {
+            UP => self.cmd_up(),
+            DOWN => self.cmd_down(),
+            UPFWD => {
                 self.cmd_up();
                 self.cmd_fwd();
             }
             PRESS => self.cmd_strike(),
             RELEASE => self.cmd_relbtn(),
+            END_DEMO => self.demo_over = true,
             _ => {}
         }
     }
@@ -1230,6 +1279,22 @@ mod tests {
         run(&mut g, LEFT, 36);
         run(&mut g, NONE, 10);
         g
+    }
+
+    /// Level 0, the attract demo: the kid runs, jumps, climbs and fights
+    /// the first guard by himself, wins, and the demo ends.
+    #[test]
+    fn the_demo_plays_itself_to_the_end() {
+        let mut g = Game::new(0);
+        let mut t = 0;
+        while !g.demo_over && t < 2000 {
+            g.tick(NONE);
+            t += 1;
+        }
+        assert!(g.demo_over, "demo still running after {t} frames");
+        assert!(g.kid.life & 0x80 != 0, "the kid lost");
+        assert_eq!(g.shad.life & 0x80, 0, "the guard is still alive");
+        assert!(g.song_start.is_none());
     }
 
     /// Level 13: the vizier hears his music before he goes en garde.

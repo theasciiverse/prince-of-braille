@@ -267,6 +267,8 @@ pub struct Game {
     pub song_start: Option<crate::music::Song>,
     /// level 13's meeting music has played
     pub met_jaffar: bool,
+    /// level 0, the attract demo, has played to its end
+    pub demo_over: bool,
     /// frames the vizier waits after his music starts before he goes en
     /// garde (SDLPoP's guard_notice_timer; the Apple froze the game while a
     /// song played, AUTO.S waits for SongCue to clear)
@@ -353,6 +355,7 @@ impl Game {
             cut: None,
             song_start: None,
             met_jaffar: false,
+            demo_over: false,
             jaffar_wait: 0,
             rng: 0x1234_5678,
             ticks: 0,
@@ -361,6 +364,11 @@ impl Game {
             inverted: false,
         };
         g.start_level(level, false);
+        if level == 0 {
+            // the demo has no input, so it plays the same each time; this
+            // seed is one where the kid wins the fight
+            g.rng = 5;
+        }
         g
     }
 
@@ -420,7 +428,9 @@ impl Game {
         self.startkid(n);
         self.vis_scrn = 0;
         self.prepcut(self.kid.scrn);
-        self.show_message(format!("LEVEL {n}"), 3 * FPS);
+        if n != 0 {
+            self.show_message(format!("LEVEL {n}"), 3 * FPS);
+        }
     }
 
     /// STARTKID
@@ -643,8 +653,9 @@ impl Game {
             self.phase = Phase::LevelDone(0);
             return;
         }
-        // the clock stops on level 14, and on level 13 once the vizier is dead
-        if self.level.number < 13 || (self.level.number == 13 && self.exitopen == 0) {
+        // the clock stops on level 14, and on level 13 once the vizier is
+        // dead; it does not run in the demo
+        if (1..13).contains(&self.level.number) || (self.level.number == 13 && self.exitopen == 0) {
             self.keeptime();
         }
         self.showtime();
@@ -657,7 +668,10 @@ impl Game {
         }
         if self.kid.life & 0x80 == 0 {
             self.dead_frames += 1;
-            if self.phase == Phase::Playing {
+            if self.level.number == 0 {
+                // your death ends the demo
+                self.demo_over |= self.dead_frames > 12;
+            } else if self.phase == Phase::Playing {
                 self.phase = Phase::Dead(0);
                 log::info!("kid died at posn {}", self.kid.posn);
                 self.deathsong();

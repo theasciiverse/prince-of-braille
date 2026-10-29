@@ -30,7 +30,7 @@ mod theme;
 use apple::Screen;
 use game::{Game, Phase, FPS};
 use input::{Cmd, Input};
-use ratatui::crossterm::event::{self, Event, KeyboardEnhancementFlags, PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags};
+use ratatui::crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyboardEnhancementFlags, PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags};
 use ratatui::crossterm::execute;
 use ratatui::crossterm::terminal::supports_keyboard_enhancement;
 use ratatui::layout::Rect;
@@ -54,7 +54,7 @@ struct App {
 }
 
 fn usage() -> ! {
-    eprintln!("usage: prince-of-braille [--theme dusk|phosphor|amber|classic] [--mute] [LEVEL]   (level 1-14, default 1)");
+    eprintln!("usage: prince-of-braille [--theme dusk|phosphor|amber|classic] [--mute] [--demo] [LEVEL]   (level 1-14, default 1)");
     std::process::exit(2);
 }
 
@@ -70,6 +70,8 @@ fn main() -> io::Result<()> {
             "-h" | "--help" => usage(),
             "--dump" => dump = Some(args.next().unwrap_or_default()),
             "--mute" => mute = true,
+            // the original's attract mode: level 0 plays itself
+            "--demo" => level = 0,
             "--theme" => {
                 theme = args.next().as_deref().and_then(theme::Theme::from_name).unwrap_or_else(|| usage());
             }
@@ -118,6 +120,18 @@ fn run(terminal: &mut DefaultTerminal, level: u8, exact: bool, theme: theme::The
         while event::poll(next.saturating_duration_since(Instant::now()))? {
             if let Event::Key(k) = event::read()? {
                 log::debug!("key {:?} {:?} {:?}", k.code, k.kind, k.modifiers);
+                if app.game.level.number == 0 {
+                    // During demo, press any key to play (Esc leaves)
+                    if k.kind == KeyEventKind::Press {
+                        if k.code == KeyCode::Esc {
+                            app.quit = true;
+                        } else {
+                            log::info!("demo: new game");
+                            app.game = new_game(1);
+                        }
+                    }
+                    continue;
+                }
                 input.on_key(k, Instant::now());
             }
         }
@@ -134,6 +148,7 @@ fn run(terminal: &mut DefaultTerminal, level: u8, exact: bool, theme: theme::The
                 if let Some(s) = app.game.song_start {
                     app.audio.start_song(s);
                 }
+                app.quit |= app.game.demo_over;
             }
             next += tick;
             steps += 1;
@@ -179,6 +194,9 @@ fn run(terminal: &mut DefaultTerminal, level: u8, exact: bool, theme: theme::The
 /// text after every token. A token starting with `=` just prints.
 fn dump_frames(level: u8, script: &str, theme: theme::Theme) {
     let mut g = Game::new(level);
+    if let Some(r) = std::env::var("POB_SEED").ok().and_then(|v| v.parse().ok()) {
+        g.rng = r;
+    }
     // POB_CUT=n: start with princess scene n (as before entering `level`)
     if let Some(n) = std::env::var("POB_CUT").ok().and_then(|v| v.parse().ok()) {
         g.playcut(n, level, cut::After::Level(level));

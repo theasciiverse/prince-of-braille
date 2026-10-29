@@ -362,7 +362,11 @@ pub fn paint_status(buf: &mut Buffer, area: Rect, g: &Game, note: &str) {
         (m, None) => format!("{m} min"),
         (_, Some(s)) => format!("{s} sec"),
     };
-    let right = format!("L{}  {time}  {}", g.level.number, note);
+    let right = if g.level.number == 0 {
+        format!("DEMO  {note}")
+    } else {
+        format!("L{}  {time}  {}", g.level.number, note)
+    };
     let w = right.chars().count() as u16;
     if rx > area.x + w {
         buf.set_string(rx - w, y, &right, text);
