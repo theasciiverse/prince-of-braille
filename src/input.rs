@@ -79,6 +79,10 @@ pub enum Cmd {
     Pause,
     Theme,
     Mute,
+    /// Ctrl-G
+    SaveGame,
+    /// Ctrl-L
+    LoadGame,
 }
 
 pub struct Input {
@@ -112,9 +116,16 @@ impl Input {
     pub fn on_key(&mut self, k: KeyEvent, now: Instant) {
         let press = k.kind != KeyEventKind::Release;
         let fresh = k.kind == KeyEventKind::Press;
-        if k.modifiers.contains(KeyModifiers::CONTROL) && k.code == KeyCode::Char('c') {
-            self.cmds.push(Cmd::Quit);
-            return;
+        if k.modifiers.contains(KeyModifiers::CONTROL) {
+            match k.code {
+                KeyCode::Char('c') => self.cmds.push(Cmd::Quit),
+                KeyCode::Char('g') if fresh => self.cmds.push(Cmd::SaveGame),
+                KeyCode::Char('l') if fresh => self.cmds.push(Cmd::LoadGame),
+                _ => {}
+            }
+            if matches!(k.code, KeyCode::Char('c' | 'g' | 'l')) {
+                return;
+            }
         }
         let mode = self.mode;
         let shift = k.modifiers.contains(KeyModifiers::SHIFT);

@@ -23,6 +23,7 @@ mod music;
 mod mover;
 mod render;
 mod room;
+mod save;
 mod seq;
 mod sound;
 mod subs;
@@ -31,7 +32,7 @@ mod theme;
 use apple::Screen;
 use game::{Game, Phase, FPS};
 use input::{Cmd, Input};
-use ratatui::crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyboardEnhancementFlags, PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags};
+use ratatui::crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers, KeyboardEnhancementFlags, PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags};
 use ratatui::crossterm::execute;
 use ratatui::crossterm::terminal::supports_keyboard_enhancement;
 use ratatui::layout::Rect;
@@ -54,6 +55,8 @@ struct App {
     confirm_quit: bool,
     quit: bool,
     audio: sound::Audio,
+    /// the saved game, if there is one
+    saved: Option<save::Save>,
 }
 
 fn usage() -> ! {
@@ -114,7 +117,10 @@ fn run(terminal: &mut DefaultTerminal, level: u8, exact: bool, theme: theme::The
         confirm_quit: false,
         quit: false,
         audio: sound::Audio::new(mute),
+        saved: save::load(),
     };
+    // a game started on a level isn't saved until it reaches another
+    let mut saved_level = level;
     let mut input = Input::new(exact);
     let tick = Duration::from_secs(1) / FPS;
     let mut next = Instant::now() + tick;
@@ -125,10 +131,13 @@ fn run(terminal: &mut DefaultTerminal, level: u8, exact: bool, theme: theme::The
             if let Event::Key(k) = event::read()? {
                 log::debug!("key {:?} {:?} {:?}", k.code, k.kind, k.modifiers);
                 if app.game.level.number == 0 {
-                    // During demo, press any key to play (Esc leaves)
+                    // During demo, press any key to play (Esc leaves,
+                    // Ctrl-L resumes the saved game)
                     if k.kind == KeyEventKind::Press {
                         if k.code == KeyCode::Esc {
                             app.quit = true;
+                        } else if k.modifiers.contains(KeyModifiers::CONTROL) && k.code == KeyCode::Char('l') {
+                            handle(&mut app, Cmd::LoadGame);
                         } else {
                             log::info!("demo: new game");
                             app.game = new_game(1);
@@ -153,6 +162,15 @@ fn run(terminal: &mut DefaultTerminal, level: u8, exact: bool, theme: theme::The
                     app.audio.start_song(s);
                 }
                 app.quit |= app.game.demo_over;
+                // reaching a level saves the game, as Ctrl-G there would
+                let g = &app.game;
+                if g.level.number != saved_level && g.cut.is_none() && g.phase == Phase::Playing {
+                    saved_level = g.level.number;
+                    if let Some(s) = save::Save::of(g) {
+                        save::store(s);
+                        app.saved = Some(s);
+                    }
+                }
             }
             next += tick;
             steps += 1;
@@ -265,7 +283,7 @@ fn dump_frames(level: u8, script: &str, theme: theme::Theme) {
             };
             render::paint_dos(&mut buf, r, &pic, Glyphs::Hybrid);
         }
-        render::paint_status(&mut buf, Rect::new(0, h, w, 1), &g, "");
+        render::paint_status(&mut buf, Rect::new(0, h, w, 1), &g, "", None);
         let k = &g.kid;
         println!(
             "== {tok}  scrn={} x={} y={} posn={} action={} face={} bx={} by={} sword={} str={} phase={:?} trobs={} mobs={}",
@@ -371,6 +389,31 @@ fn handle(app: &mut App, cmd: Cmd) {
             }
         }
         Cmd::Pause => app.paused = !app.paused,
+        Cmd::SaveGame => {
+            if g.cut.is_some() || !matches!(g.phase, Phase::Playing | Phase::Dead(_)) {
+                return;
+            }
+            let msg = match save::Save::of(g) {
+                Some(s) if save::store(s) => {
+                    app.saved = Some(s);
+                    "GAME SAVED"
+                }
+                Some(_) => "UNABLE TO SAVE GAME",
+                None if g.level.number < *save::LEVELS.start() => "SAVING STARTS ON LEVEL 3",
+                None => return,
+            };
+            g.show_message(msg.into(), 2 * FPS);
+        }
+        Cmd::LoadGame => {
+            let start = g.level.number == 0
+                || matches!(g.phase, Phase::TimeUp | Phase::Won)
+                || g.cut.as_ref().is_some_and(|c| c.after == cut::After::NewGame);
+            if let Some(s) = app.saved.filter(|_| start) {
+                log::info!("resume {s:?}");
+                app.audio.stop_song();
+                app.game = s.resume();
+            }
+        }
         Cmd::Mute => {
             app.audio.muted = !app.audio.muted;
             if app.audio.muted {
@@ -420,7 +463,7 @@ fn draw(f: &mut ratatui::Frame, app: &mut App, input: &Input) {
         render::paint_flash(buf, Rect::new(ox, oy, w, h), c);
     }
     let note = status_note(app, input, &format!("{} {} {}x", app.theme.name(), app.glyphs.name(), scale));
-    render::paint_status(buf, Rect::new(ox, oy + h, w, 1), &app.game, &note);
+    render::paint_status(buf, Rect::new(ox, oy + h, w, 1), &app.game, &note, app.saved.map(|s| s.level));
     confirm_quit(buf, app, ox, oy, w, h);
 }
 
@@ -436,7 +479,7 @@ fn draw_dos(buf: &mut ratatui::buffer::Buffer, area: Rect, app: &App, input: &In
         render::paint_flash(buf, r, c);
     }
     let note = status_note(app, input, app.glyphs.name());
-    render::paint_status(buf, Rect::new(r.x, r.y + r.height, r.width, 1), &app.game, &note);
+    render::paint_status(buf, Rect::new(r.x, r.y + r.height, r.width, 1), &app.game, &note, app.saved.map(|s| s.level));
     confirm_quit(buf, app, r.x, r.y, r.width, r.height);
 }
 

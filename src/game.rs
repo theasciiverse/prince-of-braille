@@ -244,6 +244,9 @@ pub struct Game {
     // strength and time
     pub kid_strength: u8,
     pub max_strength: u8,
+    /// origstrength: the kid's strength when the level began; a restart
+    /// goes back to it, so a potion drunk before dying is drunk again
+    pub orig_strength: u8,
     pub opp_strength: u8,
     pub max_opp_str: u8,
     /// this frame's strength changes, applied by CHGMETERS (as bytes)
@@ -340,6 +343,7 @@ impl Game {
             exitopen: 0,
             kid_strength: 3,
             max_strength: 3,
+            orig_strength: 3,
             opp_strength: 0,
             max_opp_str: 0,
             chg_kid_str: 0,
@@ -394,7 +398,9 @@ impl Game {
         let n = n.min(crate::level::NUM_LEVELS - 1);
         log::info!("start level {n}");
         if n != self.level.number {
+            // LoadNextLevel
             self.milestone = false;
+            self.orig_strength = self.max_strength;
         }
         self.level = Level::load(n);
         crate::mover::set_initials(&mut self.level);
@@ -451,6 +457,8 @@ impl Game {
         k.x = getblockej(k.block_x as i8).wrapping_add(ANGLE + 7);
         k.face = face ^ 0xff;
         self.ch = k;
+        // the demo's kid has 4
+        self.max_strength = if n == 0 { 4 } else { self.orig_strength };
         self.kid_strength = self.max_strength;
 
         match n {
@@ -944,6 +952,7 @@ impl Game {
     fn milestone3(&mut self) {
         if self.level.number == 3 && self.ch.scrn == 7 && !self.milestone {
             self.milestone = true;
+            self.orig_strength = self.max_strength;
             log::info!("level 3 milestone");
         }
     }

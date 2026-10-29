@@ -403,7 +403,8 @@ pub fn paint_flash(buf: &mut Buffer, area: Rect, color: u8) {
     }
 }
 
-pub fn paint_status(buf: &mut Buffer, area: Rect, g: &Game, note: &str) {
+/// `resume`: the level of the saved game, offered where Ctrl-L resumes it.
+pub fn paint_status(buf: &mut Buffer, area: Rect, g: &Game, note: &str, resume: Option<u8>) {
     let y = area.y;
     let red = Style::default().fg(Color::Rgb(230, 60, 50)).bg(Color::Black);
     let dimr = Style::default().fg(Color::Rgb(110, 40, 35)).bg(Color::Black);
@@ -421,11 +422,18 @@ pub fn paint_status(buf: &mut Buffer, area: Rect, g: &Game, note: &str) {
         }
         x += 1;
     }
+    let opening = g.cut.as_ref().is_some_and(|c| c.after == crate::cut::After::NewGame);
+    let resume = resume.map(|n| format!("Ctrl-L continues level {n}"));
     let msg = match g.phase {
         Phase::Dead(_) if g.dead_frames > 24 => Some("Press SPACE to continue".to_string()),
-        Phase::TimeUp => Some("TIME HAS EXPIRED  (R restarts, Esc quits)".to_string()),
+        Phase::TimeUp => Some(match resume {
+            Some(r) => format!("TIME HAS EXPIRED  (R restarts, {r}, Esc quits)"),
+            None => "TIME HAS EXPIRED  (R restarts, Esc quits)".to_string(),
+        }),
         Phase::Won => Some("YOU WIN".to_string()),
+        Phase::Cut if opening && resume.is_some() => Some(format!("Space skips, {}", resume.unwrap())),
         Phase::Cut => Some("Space skips".to_string()),
+        _ if g.level.number == 0 => resume,
         _ => g.message.as_ref().map(|(s, _)| s.clone()),
     };
     if let Some(m) = msg {

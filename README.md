@@ -38,6 +38,13 @@ pixel of the DOS art.
   classic) and `f` scale
 - Space skips a scene in the princess's room; Esc twice quits
 
+## Saving
+
+From level 3 on, reaching a level saves the game, and Ctrl-G saves it
+there and then, as in the original. A saved game keeps the level, the time
+left and your strength; it continues from the start of that level. Ctrl-L
+continues it from the opening scene, the demo or the end of a game.
+
 In terminals with the kitty keyboard protocol (kitty, WezTerm, foot,
 Ghostty and others) keys are read exactly; elsewhere a held key is
 recognised from the keyboard's repeat.
@@ -48,7 +55,8 @@ Bugs in the original are fixed the way SDLPoP fixes them: you can no
 longer press a plate through a closed gate, walk through a wall next to an
 open gate or a slicer, land safely on spikes that haven't sprung, fall
 onto a guard unhurt or grab a ledge two storeys down, and guards don't
-follow you through closed gates.
+follow you through closed gates. Reaching a level from level 3 on saves
+the game by itself.
 
 ## Credits
 

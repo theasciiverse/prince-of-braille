@@ -152,7 +152,7 @@ the choice is saved to `~/.config/prince-of-braille/theme`;
 Shift or Space = button (grab, careful step, pick up/drink). With the kitty
 keyboard protocol keys are exact (real releases, chords); elsewhere held
 keys are inferred from OS key repeat. `r` restart level, `n`/`b` next/prev
-level, `p` pause, `v` DOS art or Apple picture, `g` glyph mode, `c`
+level, `p` pause, Ctrl-G save, Ctrl-L resume a saved game, `v` DOS art or Apple picture, `g` glyph mode, `c`
 colour theme and `f` scale (Apple picture), `m` or F8
 sound on/off (`--mute` starts without sound), Space skips a princess
 scene, Esc Esc quit.
@@ -320,6 +320,22 @@ DOJUMPHANG never had the extra check), fix_loose_left_of_potion (a DOS
 drawing bug), enable_freeze_time_during_end_music (nothing here waits
 for the music), fix_gate_drawing_bug and fix_bigpillar_climb (off in
 SDLPoP too). enable_crouch_after_climbing waits for the controls work.
+
+**Saving** (2026-10-29, `src/save.rs`): as MISC.S DOSAVEGAME and
+TOPCTRL.S ResumeGame. A save holds the level, origstrength (the kid's
+strength when the level began), FrameCount and NextTimeMsg; resuming
+starts that level from its beginning and shows the time left. Levels 3 to
+13 only (FirstSideB; SDLPoP's limits too); Ctrl-G on levels 1 and 2 says
+so instead of the Apple's splat. Ctrl-G saves as the original did, and
+reaching a level saves by itself (the player wins: it is what pressing
+Ctrl-G on the level's first frame would save, so nothing gets easier).
+Ctrl-L resumes from the opening scene, the demo, time up or the end, as
+SDLPoP's from the title; the status line offers it there. The file is
+`$XDG_DATA_HOME/prince-of-braille/save` (`~/.local/share`, `%APPDATA%`),
+plain `key value` lines. With origstrength the port also got the
+original's restart right: dying takes back a life potion drunk on that
+level (it had kept the extra strength, so the potion could be drunk again
+and again), and the demo's kid has 4 strength, as SUBS.S gives him.
 
 **The DOS renderer** (2026-10-29, `src/dos.rs`): the game is drawn with
 the DOS version's art from PrinceJS (Unlicense; `tools/dos_art.py` copies
