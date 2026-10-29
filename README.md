@@ -1,9 +1,10 @@
 # Prince of Braille
 
 Jordan Mechner's Prince of Persia (Apple II, 1989) in the terminal, ported
-routine by routine from his own 6502 source. The prince runs, leaps, hangs
-and fights in Braille dots, so the rotoscoped animation keeps every frame;
-the dungeons and palaces around him are drawn in block glyphs.
+routine by routine from his own 6502 source, and drawn with the DOS
+version's art. The prince runs, leaps, hangs and fights in Braille dots, so
+the rotoscoped animation keeps every frame; the dungeons and palaces around
+him are drawn in block glyphs.
 
 Sixty minutes, fourteen levels: gates and pressure plates, loose floors,
 spikes and slicers, guards with their own fighting styles, the skeleton, the
@@ -21,8 +22,9 @@ av play prince-of-braille
 Or from the source: `cargo run --release -- [LEVEL]`. `--demo` plays the
 original's attract demo; any key starts a game from it.
 
-Needs a terminal of at least 70x25 with truecolour and a font with the
-Braille block. At 140x49 and larger it draws the full 280x192 screen.
+Needs a terminal with truecolour and a font with the Braille block. The
+picture fills the window at any size; 80x24 is playable, 160x59 shows every
+pixel of the DOS art.
 
 ## Controls
 
@@ -31,8 +33,9 @@ Braille block. At 140x49 and larger it draws the full 280x192 screen.
 - Shift or Space: the button (grab a ledge, careful step, pick up, drink,
   strike with the sword); Up blocks
 - `r` restart the level, `p` pause, `m` or F8 sound on and off
-- `c` colour theme (dusk, phosphor, amber, classic), `g` glyph mode, `f`
-  scale
+- `v` switches between the DOS art and the Apple II picture; `g` glyph
+  mode; with the Apple picture, `c` colour theme (dusk, phosphor, amber,
+  classic) and `f` scale
 - Space skips a scene in the princess's room; Esc twice quits
 
 In terminals with the kitty keyboard protocol (kitty, WezTerm, foot,
@@ -42,8 +45,8 @@ recognised from the keyboard's repeat.
 ## Credits
 
 Prince of Persia is by Jordan Mechner, who released the Apple II source
-code in 2012. The images and level layouts come from that source. The music
-and the princess's room are the DOS version's, from PrinceJS
-(github.com/oklemenz/PrinceJS).
+code in 2012. The level layouts and the Apple II picture come from that
+source. The art, the princess's room and the music are the DOS version's,
+from PrinceJS (github.com/oklemenz/PrinceJS).
 
 Port by Asciiverse, MIT licensed (see LICENSE).

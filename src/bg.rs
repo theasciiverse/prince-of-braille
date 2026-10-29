@@ -802,6 +802,16 @@ fn add_char(objs: &mut Objs, g: &Game, c: &Char, op: Op, ink: Ink, shift: i32, l
     }
 }
 
+/// QUICKFLOOR's marks for one character (1 floorbuf, 2 halfbuf per block).
+pub(crate) fn front_floors(g: &Game, c: &Char) -> [u8; 30] {
+    let mut marks = [0u8; 30];
+    let (f, frame) = setupchar(c);
+    if let Some(e) = draw_edges(g, c, &f, frame.check) {
+        quickfloor(c, &e, &mut marks);
+    }
+    marks
+}
+
 /// GETEDGES (CTRLSUBS.S) for drawing: the blocks a character's image
 /// covers.
 struct DrawEdges {

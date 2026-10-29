@@ -20,7 +20,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 DEFAULT_REF = os.path.join(HERE, "..", "..", "..", "references", "Prince of Persia", "PrinceJS-master.zip")
 PREFIX = "PrinceJS-master/assets/"
-SHEETS = ["dungeon", "palace", "general", "kid", "shadow", "skeleton", "fatguard", "jaffar", "sword"] + [
+SHEETS = ["dungeon", "palace", "general", "kid", "shadow", "skeleton", "fatguard", "jaffar", "sword", "princess", "vizier", "mouse"] + [
     f"guard-{i}" for i in range(1, 8)
 ]
 

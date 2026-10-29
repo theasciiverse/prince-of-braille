@@ -166,6 +166,66 @@ pub fn backdrop(cut: &Cut) -> Backdrop {
     out
 }
 
+/// The scene in the DOS art: the room, the hourglass, the stars, the
+/// torch flames, the characters from their DOS sheets and the pillars in
+/// front, as a picture for the DOS renderer.
+pub fn picture(g: &Game, cut: &Cut) -> crate::dos::Pic {
+    use crate::dos::{self, S};
+    let mut back = Canvas(pic(ROOM).px.to_vec());
+    if let Some(gs) = cut.glass {
+        let gs = gs.min(8) as usize;
+        back.blit(&pic(CLOCK + (gs * 6 + 4) / 8), CLOCKX, CLOCKY);
+        if cut.sand >= 0 && gs < 8 {
+            back.blit(&pic(SAND + cut.sand as usize % 3), SANDX, SANDY);
+        }
+    }
+    let pal = palette();
+    let colour = |v: u8| -> Option<[u8; 3]> {
+        let v = v as usize;
+        (v != 0).then(|| [pal[(v - 1) * 3], pal[(v - 1) * 3 + 1], pal[(v - 1) * 3 + 2]])
+    };
+    let mut out = dos::Pic::new();
+    for y in 0..dos::H {
+        for x in 0..dos::W {
+            if let Some(c) = colour(back.0[((y + TOP) * DOS_W + x) as usize]) {
+                // the night sky, lifted just past where the renderer turns
+                // near-black cells black
+                out.put(x, y, if c == SKY { [0, 32, 112] } else { c }, false);
+            }
+        }
+    }
+    for (n, &(sx, sy)) in STARS.iter().enumerate() {
+        let lit = cut.stars[n % 4] > 0 && n < 4;
+        out.put(sx, sy - TOP, if lit { [255; 3] } else { [85; 3] }, false);
+    }
+    // the torch flames over the picture's cups
+    for (t, &cx) in TORCHX.iter().enumerate() {
+        let name = format!("fire_{}", cut.torch[t] % 9 + 1);
+        if let Some(f) = dos::img(S::General, &name) {
+            out.named(S::General, &name, cx - f.w / 2, TORCHY - TOP - f.h);
+        }
+    }
+    // the characters, the lower one on the screen behind (sortlist)
+    let mut chars: Vec<&Char> = [&g.kid, &g.shad].into_iter().filter(|c| c.posn != 0).collect();
+    if chars.len() == 2 && chars[1].y > chars[0].y {
+        chars.swap(0, 1);
+    }
+    for c in chars {
+        dos::cut_character(&mut out, c, DY + 1);
+    }
+    let pillar = pic(PILLAR);
+    for &(px, py) in &PILLARS {
+        for r in 0..pillar.h {
+            for c in 0..pillar.w {
+                if let Some(col) = colour(pillar.px[(r * pillar.w + c) as usize]) {
+                    out.put(px + c, py + r - TOP, col, false);
+                }
+            }
+        }
+    }
+    out
+}
+
 /// The scene's Apple images: the torch flames and the characters.
 pub fn draw(scr: &mut Screen, g: &Game, cut: &Cut) {
     scr.clear();

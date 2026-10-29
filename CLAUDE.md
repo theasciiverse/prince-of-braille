@@ -152,7 +152,8 @@ the choice is saved to `~/.config/prince-of-braille/theme`;
 Shift or Space = button (grab, careful step, pick up/drink). With the kitty
 keyboard protocol keys are exact (real releases, chords); elsewhere held
 keys are inferred from OS key repeat. `r` restart level, `n`/`b` next/prev
-level, `p` pause, `c` colour theme, `g` glyph mode, `f` scale, `m` or F8
+level, `p` pause, `v` DOS art or Apple picture, `g` glyph mode, `c`
+colour theme and `f` scale (Apple picture), `m` or F8
 sound on/off (`--mute` starts without sound), Space skips a princess
 scene, Esc Esc quit.
 
@@ -286,75 +287,42 @@ images now end just left of x (MLAY subtracts the width from XCO): the
 port had drawn every right-facing character 7 pixels too far right since
 the first cut.
 
-**Open, for the new renderer (see Direction below):** facing right into a palace panel
-(level 10 screen 1, after the bump) the kid's image lies inside the
-wall's picture and the panel's front piece covers him, so he all but
-vanishes. The bump position matches COLL.S and the mirror rule matches
-MLAY; facing left the kid overlaps a wall by a few pixels only. Whatever
-the Apple did, the kid must stay visible: the new renderer draws him over
-the panel.
-
-## Rights: what Mechner's README actually says
-
-Checked 2026-10-03 in the reference zip (README updated September 2024):
-"As the author and copyright holder of this source code, I personally have
-no problem with anyone studying it, modifying it, attempting to run it,
-etc. Please understand that this does NOT constitute a grant of rights of
-any kind in Prince of Persia, which is an ongoing Ubisoft game franchise.
-Ubisoft alone has the right to make and distribute Prince of Persia
-games." The repo's LICENSE file only points to that README.
-
-So the earlier "legally clear" wording below does not match the source's
-own terms for distribution. This build embeds Mechner's original image
-tables and level blueprints (`assets/apple2/`) and data assembled from his
-tables (`src/gen/`). Studying, modifying and running it is what he
-explicitly welcomes; shipping it in the catalog was a separate question for
-David, settled on 2026-10-29: he chose it for the catalog. The game code
-itself was written from the 6502 source (PrinceJS, public domain, was only
-glanced at); SDLPoP (GPL-3) was not used.
-
-## Open questions
-
-- [ ] Movement system approach — faithful rotoscoped animation reproduction
-      vs new Braille-native animation built with the same design principles
-- [ ] Level data — extract from original source directly, or rebuild levels
-      using the original design language
-- [ ] Texture overlay technical implementation — confirm the Terminal Orbit
-      `texture.rs` approach ports cleanly to a 2.5D side-scrolling context
-- [ ] Trap/hazard rendering — floor traps, spikes, guards need to read clearly
-      at Braille resolution without ambiguity, since PoP's difficulty depends
-      on precise player trust in what they see
-- [ ] Timer mechanic — the original's real-time countdown is a defining
-      feature; confirm it carries over as-is
-- [ ] Scope: original campaign faithful recreation vs new levels using the
-      same engine
-
-## Status
-
-First playable cut (2026-10-03): kid movement, traps, all 14 original
-levels, hybrid Braille/block rendering. See "What exists" and "Rights"
-above. The design text above this section is from the 2026-07-08 ideation
-and is kept as written.
-
-2026-10-28: guards and sword fighting, the skeleton, guards following
-you between screens, the level 3 checkpoint and the level 7 drop-in
-start; the kid has his sword from level 2 on, as in the original.
-Then the shadow (level 4 mirror, levels 5 and 6, the level 12 fight and
-merge), the mirror and reflection, slicers, the level 13 crumbling
-floors and the level 12 phantom bridge. Then the upside-down potion
-and screen flashes, and the sound effects.
-
-2026-10-29: version 0.9.0. The clock, CROPCHAR, the princess's room
-scenes, the DOS music, the vizier's wait for his music and the attract
-demo. Into the catalog with the demo as its preview. Then the DOS room
-picture in the princess's room.
+**The level 10 panel** (settled 2026-10-29): facing right into a palace
+panel (level 10 screen 1, after the bump) the kid stands inside the
+panel's picture, as COLL.S puts him; the Apple and the DOS layering both
+hide him behind its front. The DOS renderer leaves that panel's front out
+while most of him is in its block, so he stays in view (tested).
 
 **Direction (David, 2026-10-29):** a good terminal Prince of Persia, not
 an Apple II emulation. The source decides how it plays (moves, timing,
 guards, levels); how it looks, sounds and handles is designed for the
 terminal, and where the two disagree the player wins. Bugs in the
 original that hurt play get fixed, as SDLPoP's optional fixes do. Plan,
-in order: the room (done), then a renderer that draws tiles as terminal
-art sized to the window instead of the NTSC 280x192 picture (this also
-settles the level 10 panel), the original's bugs, and controls that
-work from key repeat.
+in order: the room (done), the DOS renderer (done, below; David chose
+the DOS art over new terminal art), the original's bugs, and controls
+that work from key repeat.
+
+**The DOS renderer** (2026-10-29, `src/dos.rs`): the game is drawn with
+the DOS version's art from PrinceJS (Unlicense; `tools/dos_art.py` copies
+its sheets to `assets/dos/` and writes `src/gen/dos_atlas.rs`), put
+together as PrinceJS builds a room: per block a 60x79 back and front
+image at x = 32 col, y = 63 row - 13, all backs (lower rooms first, rows
+bottom up, left to right), then the characters, then all fronts. The
+picture is 320x192 and `render::paint_dos` fits it to the window at any
+size (a DOS pixel 1.2 dots tall), characters in Braille. What the engine
+knows drives it: our frame tables match the DOS ones, so a character's
+DOS x is ours times 8/7 and his sprite is `kid-<frame>`, `guard-<colour>-
+<frame - 150>` (colour per level and room from PrinceJS's maps),
+`shadow-`, `skeleton-`, `jaffar-` (level 13), `fatguard-` (level 6);
+swords from the DOS sword table. Gates, spikes, loose floors, slicers,
+torches, potions, the sword, plates and the exit door follow the blocks'
+states. A kid hanging facing right goes behind the floor he hangs from
+(PrinceJS maskTile, on the floors QUICKFLOOR marks); climbing up he has
+the `kid-135r`... frames. A hurt character shows the DOS splash (a
+guard's tinted his colour). The mirror is PrinceJS's: a floor with the
+glass on it, the kid's reflection mirrored about it and a cover hiding
+it outside. The princess's scenes are drawn the same way (`room::picture`):
+the DOS room, `princess-<frame>`, `vizier-<frame - 47>`, `mouse-<frame -
+185>`, the DOS flames. `v` switches to the Apple picture (`POB_VIEW=apple`
+in a dump), where `c`, `f` and the themes still apply; `POB_SIZE=WxH`
+sets a dump's size, `POB_MIRROR` puts up the level 4 mirror.

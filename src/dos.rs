@@ -18,6 +18,9 @@ use std::sync::OnceLock;
 mod atlas;
 
 pub const W: i32 = 320;
+/// A scratch layer is filled with this unused colour, to tell what was
+/// drawn on it from what is clear.
+const CLEAR: [u8; 3] = [1, 2, 3];
 pub const H: i32 = 192;
 
 /// The picture: a colour per pixel, and which pixels are characters (the
@@ -28,12 +31,12 @@ pub struct Pic {
 }
 
 impl Pic {
-    fn new() -> Pic {
+    pub(crate) fn new() -> Pic {
         let n = (W * H) as usize;
         Pic { col: vec![[0; 3]; n], kid: vec![false; n] }
     }
 
-    fn put(&mut self, x: i32, y: i32, c: [u8; 3], kid: bool) {
+    pub(crate) fn put(&mut self, x: i32, y: i32, c: [u8; 3], kid: bool) {
         if (0..W).contains(&x) && (0..H).contains(&y) {
             let i = (y * W + x) as usize;
             self.col[i] = c;
@@ -63,14 +66,14 @@ impl Pic {
 }
 
 /// A decoded sprite sheet.
-struct Sheet {
+pub(crate) struct Sheet {
     w: usize,
     px: Vec<[u8; 4]>,
     frames: atlas::Frames,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
-enum S {
+pub(crate) enum S {
     Dungeon,
     Palace,
     General,
@@ -80,6 +83,9 @@ enum S {
     Fatguard,
     Jaffar,
     Sword,
+    Princess,
+    Vizier,
+    Mouse,
     Guard(u8),
 }
 
@@ -118,6 +124,9 @@ fn sheet(s: S) -> &'static Sheet {
             decode(include_bytes!("../assets/dos/fatguard.png"), atlas::FATGUARD),
             decode(include_bytes!("../assets/dos/jaffar.png"), atlas::JAFFAR),
             decode(include_bytes!("../assets/dos/sword.png"), atlas::SWORD),
+            decode(include_bytes!("../assets/dos/princess.png"), atlas::PRINCESS),
+            decode(include_bytes!("../assets/dos/vizier.png"), atlas::VIZIER),
+            decode(include_bytes!("../assets/dos/mouse.png"), atlas::MOUSE),
         ];
         v.push(decode(include_bytes!("../assets/dos/guard-1.png"), atlas::GUARD_1));
         v.push(decode(include_bytes!("../assets/dos/guard-2.png"), atlas::GUARD_2));
@@ -138,22 +147,25 @@ fn sheet(s: S) -> &'static Sheet {
         S::Fatguard => 6,
         S::Jaffar => 7,
         S::Sword => 8,
-        S::Guard(c) => 8 + c.clamp(1, 7) as usize,
+        S::Princess => 9,
+        S::Vizier => 10,
+        S::Mouse => 11,
+        S::Guard(c) => 11 + c.clamp(1, 7) as usize,
     };
     &all[i]
 }
 
 /// A frame of a sheet.
 #[derive(Clone, Copy)]
-struct Img {
+pub(crate) struct Img {
     s: &'static Sheet,
     x: usize,
     y: usize,
-    w: i32,
-    h: i32,
+    pub w: i32,
+    pub h: i32,
 }
 
-fn img(s: S, name: &str) -> Option<Img> {
+pub(crate) fn img(s: S, name: &str) -> Option<Img> {
     let sh = sheet(s);
     let i = sh.frames.binary_search_by(|f| f.0.cmp(name)).ok()?;
     let (_, x, y, w, h) = sh.frames[i];
@@ -170,9 +182,11 @@ struct Lay {
     /// draw only this many columns
     width: i32,
     kid: bool,
+    /// multiplied into every pixel (Phaser's tint)
+    tint: [u8; 3],
 }
 
-const PLAIN: Lay = Lay { mirror: false, lift: 0, width: 999, kid: false };
+const PLAIN: Lay = Lay { mirror: false, lift: 0, width: 999, kid: false, tint: [255; 3] };
 
 impl Pic {
     /// Lay `im` with its top-left (or, mirrored, top-right) at (x, y).
@@ -184,12 +198,13 @@ impl Pic {
                     continue;
                 }
                 let px = if l.mirror { x - 1 - c } else { x + c };
-                self.put(px, y + r - l.lift, [p[0], p[1], p[2]], l.kid);
+                let t = |k: usize| (p[k] as u16 * l.tint[k] as u16 / 255) as u8;
+                self.put(px, y + r - l.lift, [t(0), t(1), t(2)], l.kid);
             }
         }
     }
 
-    fn named(&mut self, s: S, name: &str, x: i32, y: i32) {
+    pub(crate) fn named(&mut self, s: S, name: &str, x: i32, y: i32) {
         if let Some(im) = img(s, name) {
             self.lay(&im, x, y, PLAIN);
         }
@@ -249,6 +264,7 @@ pub fn picture(g: &Game) -> Pic {
         v.mob(&mut pic, m);
     }
     v.characters(&mut pic);
+    v.mask(&mut pic);
     for &(s, c, r, x, y) in &blocks {
         v.tile(&mut pic, s, c, r, x, y, true);
     }
@@ -313,6 +329,9 @@ impl View<'_> {
         let k = self.key;
         let e = id as i32;
         let fg = if front { "_fg" } else { "" };
+        if front && matches!(id, obj::PANELWIF | obj::PANELWOF) && scrn == self.g.vis_scrn && self.kid_in_panel(c, r) {
+            return;
+        }
         match id {
             obj::BLOCK => self.wall(pic, scrn, c, r, x, y, st, front),
             obj::SPACE | obj::FLOOR => {
@@ -347,7 +366,8 @@ impl View<'_> {
             }
             obj::LOOSE => {
                 // shaking: the board's wobble frames, no front
-                let n = if st & 0x80 != 0 { (st & 0x7f).clamp(1, 8) } else { 0 };
+                // (the state counts the wobble, with bit 7 once it falls)
+                let n = if st & 0x7f == 0 { 0 } else { (st & 0x7f).clamp(1, 8) };
                 if n == 0 {
                     self.named(pic, &format!("{k}_{e}{fg}"), x, y);
                 } else if !front {
@@ -406,6 +426,21 @@ impl View<'_> {
                     }
                 }
             }
+            obj::MIRROR => {
+                // a floor with the mirror on it (PrinceJS Mirror): the
+                // kid's reflection behind the glass, the cover hiding it
+                // outside
+                self.named(pic, &format!("{k}_1{fg}"), x, y);
+                if front {
+                    self.named(pic, &format!("{k}_1_fg_mirror"), x + 3, y - 3);
+                    return;
+                }
+                self.named(pic, &format!("{k}_1_mirror"), x + 3, y - 3);
+                if self.g.reflect.is_some() && scrn == self.g.vis_scrn {
+                    self.character_in(pic, &self.g.kid, Some(x));
+                }
+                self.named(pic, &format!("{k}_1_mirror_cover"), x - 103, y - 5);
+            }
             obj::PILLARBOTTOM => {
                 let low = if self.block(scrn, c, r - 1).0 != obj::PILLARTOP { "_low" } else { "" };
                 let name = if front { format!("{k}_{e}_fg{low}") } else { format!("{k}_{e}{low}") };
@@ -422,6 +457,24 @@ impl View<'_> {
             }
             _ => self.named(pic, &format!("{k}_{e}{fg}"), x, y),
         }
+    }
+
+    /// The kid bumped into a panel facing right stands inside its picture
+    /// (COLL.S puts him there; the Apple and DOS games both hide him behind
+    /// its front). He is kept in view: the panel's front is left out while
+    /// most of him is in its block.
+    fn kid_in_panel(&self, c: i32, r: i32) -> bool {
+        let k = &self.g.kid;
+        if k.face & 0x80 != 0 || k.scrn != self.g.vis_scrn || k.block_y as i8 as i32 != r {
+            return false;
+        }
+        let (f, _) = crate::bg::setupchar(k);
+        let x = (f.x * 8).div_euclid(7);
+        // facing right he is drawn leftwards from x, about 20 pixels wide;
+        // the panel's picture reaches about 16 pixels into the next block
+        let (l, rr) = (x - 20, x);
+        let overlap = rr.min(c * 32 + 48) - l.max(c * 32);
+        overlap >= 6
     }
 
     /// A wall block: the dungeon's stones by seed and neighbours, the
@@ -478,6 +531,44 @@ impl View<'_> {
         self.named(pic, &format!("{}_falling", self.key), m.x as i32 * 8, y - 63 - 13 + 3);
     }
 
+    /// A kid hanging facing right goes behind the floor he hangs from:
+    /// that block's back image again, cut to the block itself (PrinceJS
+    /// maskTile), for the floors QUICKFLOOR marks with open space to their
+    /// left (FRAMEADV.S drawfloor). Climbing up he has frames of his own.
+    fn mask(&self, pic: &mut Pic) {
+        let g = self.g;
+        let k = &g.kid;
+        // hanging, swinging and the hang at the end of a jump (79)
+        let hanging = (87..=100).contains(&k.posn) || k.posn == 79;
+        if k.face & 0x80 != 0 || !hanging || k.scrn != g.vis_scrn {
+            return;
+        }
+        let marks = crate::bg::front_floors(g, k);
+        for (i, &m) in marks.iter().enumerate() {
+            let (c, r) = ((i % 10) as i32, (i / 10) as i32);
+            if m != 1 || self.block(g.vis_scrn, c - 1, r).0 != obj::SPACE {
+                continue;
+            }
+            let mut tile = Pic::new();
+            tile.col.fill(CLEAR);
+            self.tile(&mut tile, g.vis_scrn, c, r, c * 32, r * 63 - 13, false);
+            let (x0, y0) = (c * 32, (r * 63 - 13).max(0));
+            for y in y0..(r * 63 + 66).min(H) {
+                for x in x0..(x0 + 33).min(W) {
+                    let i = (y * W + x) as usize;
+                    if tile.col[i] != CLEAR {
+                        pic.col[i] = tile.col[i];
+                        pic.kid[i] = false;
+                    }
+                }
+            }
+        }
+    }
+
+    fn character(&self, pic: &mut Pic, c: &Char) {
+        self.character_in(pic, c, None);
+    }
+
     /// The kid, the guard or shadow, and their swords.
     fn characters(&self, pic: &mut Pic) {
         let g = self.g;
@@ -498,10 +589,13 @@ impl View<'_> {
         }
     }
 
-    fn character(&self, pic: &mut Pic, c: &Char) {
+    /// Draw a character; with `mirror_at`, his reflection in the mirror
+    /// block at that x instead (PrinceJS Mirror.syncFrame: mirrored about
+    /// the glass, shown only near it).
+    fn character_in(&self, pic: &mut Pic, c: &Char, mirror_at: Option<i32>) {
         let g = self.g;
         let (f, frame) = crate::bg::setupchar(c);
-        let right = c.face & 0x80 == 0;
+        let mut right = c.face & 0x80 == 0;
         let posn = if c.id >= 2 && (102..107).contains(&c.posn) { c.posn + 70 } else { c.posn };
         let (s, name) = match c.id {
             0 => {
@@ -529,17 +623,52 @@ impl View<'_> {
             }
         };
         let Some(im) = img(s, &name) else { return };
-        let x = (f.x * 8).div_euclid(7);
+        let mut x = (f.x * 8).div_euclid(7);
+        if let Some(tx) = mirror_at {
+            let rx = (x - tx - 55).max(if right { -10 } else { -25 });
+            if !(-40..20).contains(&rx) || rx == -40 {
+                return;
+            }
+            x = tx - rx;
+            right = !right;
+        }
         let y = f.y as i32 + 3 - im.h;
         let kid = true;
+        let face = if right { 1 } else { -1 };
         pic.lay(&im, x, y, Lay { kid, ..PLAIN }.flip(right));
+        // the splash on a character just hurt (PrinceJS showSplash; the
+        // Apple's impact star), none for the skeleton or the dead
+        let hurt = if c.id == 0 { g.chg_kid_str } else { g.chg_opp_str } & 0x80 != 0;
+        let dead = matches!(posn, 177 | 178 | 185) || (106..=110).contains(&posn);
+        if hurt && !dead && s != S::Skeleton {
+            let who = match s {
+                S::Kid => "kid",
+                S::Shadow => "shadow",
+                S::Fatguard => "fatguard",
+                S::Jaffar => "jaffar",
+                _ => "guard",
+            };
+            // a guard's splash is white, tinted his colour (Enemy.COLOR)
+            const COLOR: [[u8; 3]; 7] = [
+                [0x48, 0x90, 0xfc],
+                [0xa8, 0x30, 0x00],
+                [0xfc, 0x50, 0x00],
+                [0x0c, 0x90, 0x00],
+                [0x5a, 0x00, 0xfc],
+                [0xc8, 0x58, 0xfc],
+                [0xfc, 0xfc, 0x00],
+            ];
+            let tint = if let S::Guard(k) = s { COLOR[k.clamp(1, 7) as usize - 1] } else { [255; 3] };
+            if let Some(sp) = img(S::General, &format!("{who}-splash")) {
+                pic.lay(&sp, x + 6 * face, f.y as i32 + 3 - 15 - sp.h, Lay { kid, tint, ..PLAIN }.flip(right));
+            }
+        }
         // the sword in his hand (SETUPSWORD's rule, the DOS sword table)
         let shows = (c.id == 2 && c.life & 0x80 != 0) || (229..238).contains(&c.posn) || c.sword != 0;
         let n = (frame.sword & 0x3f) as usize;
         if shows && n > 0 {
             if let Some(&(id, dx, dy)) = atlas::SWORDTAB.get(n - 1) {
                 if let Some(sw) = img(S::Sword, &format!("sword{id}")) {
-                    let face = if right { 1 } else { -1 };
                     let sx = x + dx as i32 * face;
                     let sy = f.y as i32 + 3 + dy as i32 - sw.h;
                     pic.lay(&sw, sx, sy, Lay { kid, ..PLAIN }.flip(right));
@@ -583,4 +712,57 @@ fn wall_pattern(room: u8) -> [u8; 132] {
         }
     }
     p
+}
+
+/// A character in the princess's room, his feet `dy` lines lower than the
+/// game's own rows put them: the princess, the vizier, the mouse or the
+/// kid, from their DOS sheets.
+pub(crate) fn cut_character(pic: &mut Pic, c: &Char, dy: i32) {
+    let (f, _) = crate::bg::setupchar(c);
+    let (s, name) = match c.id {
+        5 => (S::Princess, format!("princess-{}", c.posn)),
+        6 => (S::Vizier, format!("vizier-{}", c.posn.wrapping_sub(47))),
+        24 => (S::Mouse, format!("mouse-{}", c.posn.wrapping_sub(185))),
+        _ => (S::Kid, format!("kid-{}", c.posn)),
+    };
+    let Some(im) = img(s, &name) else { return };
+    let right = c.face & 0x80 == 0;
+    let x = (f.x * 8).div_euclid(7);
+    pic.lay(&im, x, f.y as i32 + dy - im.h, Lay { kid: true, ..PLAIN }.flip(right));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn kid_pixels(g: &Game) -> usize {
+        picture(g).kid.iter().filter(|&&k| k).count()
+    }
+
+    #[test]
+    fn the_kid_is_drawn_from_his_sheet() {
+        let mut g = Game::new(2);
+        for _ in 0..30 {
+            g.tick(Controls::default());
+        }
+        assert!(kid_pixels(&g) > 200, "the standing kid is a person-sized sprite");
+    }
+
+    #[test]
+    fn the_kid_stays_in_view_at_a_palace_panel() {
+        // level 10 screen 1: run right into the tapestry panel
+        let mut g = Game::new(10);
+        let right = Controls { x: 1, y: 0, btn: false };
+        for _ in 0..30 {
+            g.tick(Controls::default());
+        }
+        for _ in 0..36 {
+            g.tick(right);
+        }
+        for _ in 0..10 {
+            g.tick(Controls::default());
+        }
+        assert_eq!(g.kid.block_x, 7);
+        assert!(kid_pixels(&g) > 200, "the panel's front leaves him in view");
+    }
 }

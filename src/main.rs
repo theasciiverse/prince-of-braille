@@ -205,6 +205,11 @@ fn dump_frames(level: u8, script: &str, theme: theme::Theme) {
     if let Some(n) = std::env::var("POB_CUT").ok().and_then(|v| v.parse().ok()) {
         g.playcut(n, level, cut::After::Level(level));
     }
+    // POB_MIRROR: level 4's mirror already up, as when the exit has opened
+    if std::env::var("POB_MIRROR").is_ok() && level == 4 {
+        g.level.set_type(level::Level::index(4, 4, 0), level::obj::MIRROR);
+        g.exitopen = 1;
+    }
     if let Some(at) = std::env::var("POB_AT").ok().and_then(|v| parse_at(&v)) {
         g.place_kid(at.0, at.1, at.2, at.3);
     }
@@ -250,11 +255,15 @@ fn dump_frames(level: u8, script: &str, theme: theme::Theme) {
             let _ = std::fs::write(format!("{dir}/{:03}.ppm", g.ticks), out);
         }
         let mut buf = ratatui::buffer::Buffer::empty(Rect::new(0, 0, w, h + 1));
-        if apple_view || g.cut.is_some() {
+        if apple_view {
             render::paint_screen(&mut buf, Rect::new(0, 0, w, h), &scr, scale, Glyphs::Hybrid, theme, g.level.palace() || g.cut.is_some(), g.cut.as_ref().map(room::backdrop).as_ref());
         } else {
             let r = render::dos_fit(Rect::new(0, 0, w, h));
-            render::paint_dos(&mut buf, r, &dos::picture(&g), Glyphs::Hybrid);
+            let pic = match &g.cut {
+                Some(cut) => room::picture(&g, cut),
+                None => dos::picture(&g),
+            };
+            render::paint_dos(&mut buf, r, &pic, Glyphs::Hybrid);
         }
         render::paint_status(&mut buf, Rect::new(0, h, w, 1), &g, "");
         let k = &g.kid;
@@ -382,7 +391,7 @@ fn draw(f: &mut ratatui::Frame, app: &mut App, input: &Input) {
             }
         }
     }
-    if !app.apple && app.game.cut.is_none() {
+    if !app.apple {
         draw_dos(buf, area, app, input);
         return;
     }
@@ -417,7 +426,10 @@ fn draw(f: &mut ratatui::Frame, app: &mut App, input: &Input) {
 
 /// The game in the DOS art, as large as the window allows.
 fn draw_dos(buf: &mut ratatui::buffer::Buffer, area: Rect, app: &App, input: &Input) {
-    let pic = dos::picture(&app.game);
+    let pic = match &app.game.cut {
+        Some(cut) => room::picture(&app.game, cut),
+        None => dos::picture(&app.game),
+    };
     let r = render::dos_fit(Rect::new(area.x, area.y, area.width, area.height.saturating_sub(1)));
     render::paint_dos(buf, r, &pic, app.glyphs);
     if let Some(c) = app.game.flash() {
