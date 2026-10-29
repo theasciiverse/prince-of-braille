@@ -184,9 +184,12 @@ struct Lay {
     kid: bool,
     /// multiplied into every pixel (Phaser's tint)
     tint: [u8; 3],
+    /// the kid's colours turned into the shadow's (his white clothes
+    /// black, his hair dark blue), for shadow frames PrinceJS lacks
+    shadow: bool,
 }
 
-const PLAIN: Lay = Lay { mirror: false, lift: 0, width: 999, kid: false, tint: [255; 3] };
+const PLAIN: Lay = Lay { mirror: false, lift: 0, width: 999, kid: false, tint: [255; 3], shadow: false };
 
 impl Pic {
     /// Lay `im` with its top-left (or, mirrored, top-right) at (x, y).
@@ -199,7 +202,15 @@ impl Pic {
                 }
                 let px = if l.mirror { x - 1 - c } else { x + c };
                 let t = |k: usize| (p[k] as u16 * l.tint[k] as u16 / 255) as u8;
-                self.put(px, y + r - l.lift, [t(0), t(1), t(2)], l.kid);
+                let mut c = [t(0), t(1), t(2)];
+                if l.shadow {
+                    c = match c {
+                        [r, g, _] if r > 240 && g > 240 => [0, 0, 0],
+                        [187, 153, 0] => [35, 69, 118],
+                        c => c,
+                    };
+                }
+                self.put(px, y + r - l.lift, c, l.kid);
             }
         }
     }
@@ -597,32 +608,28 @@ impl View<'_> {
         let (f, frame) = crate::bg::setupchar(c);
         let mut right = c.face & 0x80 == 0;
         let posn = if c.id >= 2 && (102..107).contains(&c.posn) { c.posn + 70 } else { c.posn };
-        let (s, name) = match c.id {
-            0 => {
-                let r = if right && (135..=144).contains(&posn) { "r" } else { "" };
-                (S::Kid, format!("kid-{posn}{r}"))
-            }
-            1 => (S::Shadow, format!("shadow-{posn}")),
-            4 => (S::Skeleton, format!("skeleton-{}", posn.wrapping_sub(150))),
-            _ => {
-                let s = match g.level.number {
-                    6 => S::Fatguard,
-                    13 => S::Jaffar,
-                    n => {
-                        let colors = atlas::GUARD_COLORS.get(n as usize).copied().unwrap_or(&[]);
-                        S::Guard(colors.iter().find(|(r, _)| *r == c.scrn).or(colors.first()).map_or(1, |&(_, k)| k))
-                    }
-                };
-                let name = match s {
-                    S::Fatguard => "fatguard".to_string(),
-                    S::Jaffar => "jaffar".to_string(),
-                    S::Guard(k) => format!("guard-{}", k.clamp(1, 7)),
-                    _ => unreachable!(),
-                };
-                (s, format!("{name}-{}", posn.wrapping_sub(150)))
+        let s = match (c.id, g.level.number) {
+            (0, _) => S::Kid,
+            (1, _) => S::Shadow,
+            (4, _) => S::Skeleton,
+            (24, _) => S::Mouse,
+            (_, 6) => S::Fatguard,
+            (_, 13) => S::Jaffar,
+            (_, n) => {
+                let colors = atlas::GUARD_COLORS.get(n as usize).copied().unwrap_or(&[]);
+                S::Guard(colors.iter().find(|(r, _)| *r == c.scrn).or(colors.first()).map_or(1, |&(_, k)| k))
             }
         };
-        let Some(im) = img(s, &name) else { return };
+        // the shadow's missing frames (hanging, climbing, the stairs): the
+        // kid's, in the shadow's colours
+        let (im, shadow) = match sprite(s, c.id, posn, right) {
+            Some(im) => (im, false),
+            None if s == S::Shadow => match sprite(S::Kid, 0, posn, right) {
+                Some(im) => (im, true),
+                None => return,
+            },
+            None => return,
+        };
         let mut x = (f.x * 8).div_euclid(7);
         if let Some(tx) = mirror_at {
             let rx = (x - tx - 55).max(if right { -10 } else { -25 });
@@ -635,7 +642,7 @@ impl View<'_> {
         let y = f.y as i32 + 3 - im.h;
         let kid = true;
         let face = if right { 1 } else { -1 };
-        pic.lay(&im, x, y, Lay { kid, ..PLAIN }.flip(right));
+        pic.lay(&im, x, y, Lay { kid, shadow, ..PLAIN }.flip(right));
         // the splash on a character just hurt (PrinceJS showSplash; the
         // Apple's impact star), none for the skeleton or the dead
         let hurt = if c.id == 0 { g.chg_kid_str } else { g.chg_opp_str } & 0x80 != 0;
@@ -676,6 +683,37 @@ impl View<'_> {
             }
         }
     }
+}
+
+/// A character's sprite for frame `posn`. PrinceJS leaves out a few frames
+/// whose image another frame shares (the kid's 161 is 150's, 170 and 171
+/// are 158's); those borrow that frame's sprite.
+fn sprite(s: S, id: u8, posn: u8, right: bool) -> Option<Img> {
+    let name = |p: u8| match s {
+        S::Kid => {
+            let r = if right && (135..=144).contains(&p) { "r" } else { "" };
+            format!("kid-{p}{r}")
+        }
+        S::Shadow => format!("shadow-{p}"),
+        S::Skeleton => format!("skeleton-{}", p.wrapping_sub(150)),
+        S::Mouse => format!("mouse-{}", p.wrapping_sub(185)),
+        S::Fatguard => format!("fatguard-{}", p.wrapping_sub(150)),
+        S::Jaffar => format!("jaffar-{}", p.wrapping_sub(150)),
+        S::Guard(k) => format!("guard-{}-{}", k.clamp(1, 7), p.wrapping_sub(150)),
+        _ => String::new(),
+    };
+    if let Some(im) = img(s, &name(posn)) {
+        return Some(im);
+    }
+    let image = |p: u8| {
+        let f = crate::seq::frame(id, p);
+        (f.image, f.sword & 0xc0)
+    };
+    let want = image(posn);
+    if want.0 == 0 {
+        return None;
+    }
+    (1..=240u8).filter(|&p| p != posn && image(p) == want).find_map(|p| img(s, &name(p)))
 }
 
 impl Lay {
@@ -737,6 +775,30 @@ mod tests {
 
     fn kid_pixels(g: &Game) -> usize {
         picture(g).kid.iter().filter(|&&k| k).count()
+    }
+
+    #[test]
+    fn every_frame_with_an_image_has_a_sprite() {
+        // not drawn by anyone: the kid's 186-188 are the mouse's, 206 is
+        // unused, the skeleton never collapses (179-185), and the vizier
+        // meets no spikes or slicer (177, 178); the shadow borrows the kid's
+        let skip = |s: S, p: u8| match s {
+            S::Kid | S::Shadow => matches!(p, 186..=188 | 206),
+            S::Skeleton => (179..=185).contains(&p),
+            S::Jaffar => matches!(p, 177 | 178),
+            _ => false,
+        };
+        let mut missing = Vec::new();
+        let sheets = [(S::Kid, 0, 1..=240), (S::Shadow, 1, 1..=240), (S::Guard(1), 2, 150..=189), (S::Skeleton, 4, 150..=189), (S::Fatguard, 2, 150..=189), (S::Jaffar, 2, 150..=189)];
+        for (s, id, range) in sheets {
+            for p in range {
+                let found = sprite(s, id, p, false).is_some() || (s == S::Shadow && sprite(S::Kid, 0, p, false).is_some());
+                if crate::seq::frame(id, p).image != 0 && !skip(s, p) && !found {
+                    missing.push((id, p));
+                }
+            }
+        }
+        assert!(missing.is_empty(), "no sprite for {missing:?}");
     }
 
     #[test]
