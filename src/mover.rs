@@ -153,27 +153,28 @@ impl Game {
         self.addtrob(loc, v, 1);
     }
 
-    /// GETSPIKES: 0 safe, 1 sprung, 2 springing (rd = the spikes).
-    /// ADDLOWERSOUND (SUBS.S): the lowering gate ticks on alternate
-    /// frames, only where it can be seen: on this screen, or in the right
+    /// Whether a gate's sounds are heard (SUBS.S ADDLOWERSOUND, SDLPoP
+    /// play_door_sound_if_visible): on this screen, or in the right
     /// column of the screen to the left (and level 3's screen 2). The
     /// Apple tested the left screen first and gave up there, so a gate on
     /// a screen that is its own left neighbour went silent; SDLPoP's
     /// fix_gate_sounds tests both.
-    fn addlowersound(&mut self, state: u8, t: Trob) {
-        if state & 1 == 0 {
-            return;
-        }
+    fn gate_heard(&self, t: Trob) -> bool {
         let right_col = t.loc % 10 == 9;
         let left = self.level.left(self.vis_scrn);
-        let seen = (self.level.number == 3 && t.scrn == 2)
+        (self.level.number == 3 && t.scrn == 2)
             || (t.scrn == left && right_col)
-            || (t.scrn == self.vis_scrn && !right_col);
-        if seen {
-            self.add_sound(Sound::LoweringGate);
+            || (t.scrn == self.vis_scrn && !right_col)
+    }
+
+    /// A gate sound, where the gate can be heard.
+    fn gate_sound(&mut self, t: Trob, snd: Sound) {
+        if self.gate_heard(t) {
+            self.add_sound(snd);
         }
     }
 
+    /// GETSPIKES: 0 safe, 1 sprung, 2 springing (rd = the spikes).
     pub fn getspikes(&self) -> u8 {
         let v = self.spec();
         if v & 0x80 != 0 {
@@ -192,7 +193,7 @@ impl Game {
             if let Some((loc, scrn)) = self.rd_loc() {
                 self.addtrob(loc, scrn, 1);
             }
-            self.add_sound(Sound::GateDown);
+            self.add_sound(Sound::Spikes);
         } else if v & 0x80 != 0 && v != 0xff {
             self.set_spec(SPIKETIMER);
         }
@@ -274,7 +275,7 @@ impl Game {
                 self.addtrob(loc, scrn, 1);
             }
             self.alertguard = true;
-            self.add_sound(Sound::PlateDown);
+            self.add_sound(Sound::Button);
         }
         self.trigger(pptype, link);
     }
@@ -356,6 +357,16 @@ impl Game {
         }
     }
 
+    /// SDLPoP loose_shake: a loose floor rattles on some steps of its
+    /// wiggle, and when it settles.
+    fn looseshake(&mut self, settled: bool, state: u8) {
+        const LOOSE_SOUND: [bool; 12] =
+            [false, true, true, true, false, true, false, false, true, false, false, false];
+        if settled || LOOSE_SOUND.get((state & 0x7f) as usize).copied().unwrap_or(false) {
+            self.add_sound(Sound::LooseShake);
+        }
+    }
+
     /// SHAKEM1: wiggle every loose floor on row `by` of `scrn`.
     pub fn shakem(&mut self, scrn: u8, by: i32) {
         if self.level.number == 13 {
@@ -419,7 +430,6 @@ impl Game {
                     let tm = self.gettimer(state).wrapping_sub(1);
                     self.chgtimer(state, tm);
                     if tm < 2 {
-                        self.add_sound(Sound::PlateUp);
                         d = -1;
                     }
                 }
@@ -447,11 +457,16 @@ impl Game {
                 if d >= 0 {
                     state = state.wrapping_add(1);
                     if state & 0x80 != 0 {
-                        if self.level.number != 13 && state >= WIGGLETIME + 0x80 {
-                            state = 0;
-                            d = -1;
+                        if self.level.number != 13 {
+                            if state >= WIGGLETIME + 0x80 {
+                                state = 0;
+                                d = -1;
+                            }
+                            self.looseshake(state == 0, state);
                         }
-                    } else if state >= LOOSETIMER {
+                    } else if state < LOOSETIMER {
+                        self.looseshake(false, state);
+                    } else {
                         // floor detaches: becomes space, a MOB takes over
                         self.level.set_type(i, obj::SPACE);
                         state = if self.level.palace() { 1 } else { 0 };
@@ -516,7 +531,7 @@ impl Game {
         }
         *state = n | hib;
         if n == SLICER_EXT {
-            self.add_sound(Sound::JawsClash);
+            self.add_sound(Sound::Chomper);
         }
         let keep = t.scrn == self.vis_scrn
             && t.loc / 10 == self.kid.block_y
@@ -558,17 +573,19 @@ impl Game {
             return;
         }
         if *state == 0xff {
+            // already held open for good
             *d = -1;
-            self.add_sound(Sound::GateDown);
             return;
         }
+        // the DOS sounds as SDLPoP animate_door paces them: a tick every
+        // fourth step down, every second step up, and a stop at either end
         *state = state.wrapping_add(GATEINC[*d as usize]);
         if *d == 0 {
             if *state == 0 {
                 *d = -1;
-                self.add_sound(Sound::GateDown);
-            } else if *state < GMAXVAL {
-                self.addlowersound(*state, t);
+                self.gate_sound(t, Sound::GateStop);
+            } else if *state < GMAXVAL && *state & 3 == 3 {
+                self.gate_sound(t, Sound::GateClosing);
             }
             return;
         }
@@ -576,12 +593,14 @@ impl Game {
             if *d == 2 {
                 *state = 0xff;
                 *d = -1;
+                self.gate_sound(t, Sound::GateStop);
             } else {
                 *state = GATETIMER;
                 *d = 0;
+                self.add_sound(Sound::GateStop);
             }
-        } else {
-            self.add_sound(Sound::RaisingGate);
+        } else if *state & 7 == 0 {
+            self.add_sound(Sound::GateOpening);
         }
     }
 
@@ -597,17 +616,17 @@ impl Game {
             if *state <= v {
                 *state = 0;
                 *d = -1;
-                self.add_sound(Sound::GateSlam);
+                self.add_sound(Sound::LevelDoorClosing);
             } else {
                 *state -= v;
             }
             return;
         }
-        self.add_sound(Sound::RaisingExit);
+        // one long sound for the whole slide (main lets it play out)
+        self.add_sound(Sound::LevelDoorSliding);
         *state = state.wrapping_add(EXITINC);
         if *state >= EMAXVAL {
             *d = -1;
-            self.add_sound(Sound::GateDown);
             self.exitopen = 1;
             log::info!("exit open");
             self.mirappear();
@@ -671,7 +690,7 @@ impl Game {
                 }
             }
             _ => {
-                self.add_sound(Sound::LooseCrash);
+                self.add_sound(Sound::TileCrash);
                 self.shakem(m.scrn, m.level as i32);
                 m.y = BLOCK_AY[m.level as usize + 1];
                 m.vel = CRUMBLETIME.wrapping_neg();

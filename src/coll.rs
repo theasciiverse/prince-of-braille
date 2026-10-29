@@ -248,7 +248,7 @@ impl Game {
             self.animchar();
         }
         self.alertguard = true;
-        self.add_sound(Sound::SmackWall);
+        self.add_sound(Sound::Bump);
     }
 
     fn groundbump(&mut self, left: bool) {
@@ -276,7 +276,7 @@ impl Game {
             } else {
                 self.jumpseq(s::BUMPENGFWD);
                 self.animchar();
-                self.add_sound(Sound::SmackWall);
+                self.add_sound(Sound::Bump);
             }
             return;
         }
@@ -290,7 +290,7 @@ impl Game {
             self.animchar();
         }
         self.alertguard = true;
-        self.add_sound(Sound::SmackWall);
+        self.add_sound(Sound::Bump);
     }
 
     /// CHECKSLICE: does this frame's CD buffer show the kid overlapping a
@@ -351,7 +351,7 @@ impl Game {
         let by = self.ch.block_y as i8 as i32;
         self.ch.y = FLOOR_Y[(by + 1).clamp(0, 4) as usize];
         self.decstr(100);
-        self.add_sound(Sound::Splat);
+        self.add_sound(Sound::Chomped);
         self.jumpseq(s::HALVE);
         self.animchar();
         log::info!("char {} sliced", self.ch.id);
@@ -377,7 +377,7 @@ impl Game {
         if self.gate_open() {
             return;
         }
-        self.add_sound(Sound::SmackWall);
+        self.add_sound(Sound::Bump);
         let coll_x = self.rd.bx;
         self.getunderft();
         let d: u8 = if self.rd.bx > coll_x { 5 } else { (-5i8) as u8 };

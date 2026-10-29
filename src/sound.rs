@@ -1,105 +1,106 @@
-//! Sound effects: SOUND.S's speaker tones, rebuilt sample for sample.
-//!
-//! The Apple II speaker is one bit: every `bit $c030` flips the cone.
-//! SOUND.S's `tone` flips it `duration` times with a delay loop between
-//! flips, so each effect is a short square wave whose half-period is the
-//! cycle count of that loop at 1.023 MHz. The effects are rendered into
-//! buffers once at start-up and played through rodio, the way the other
-//! Asciiverse games do it. Music (the song cues) is not played.
+//! Sound effects: the DOS version's, as MP3s from PrinceJS (Unlicense),
+//! played where SDLPoP plays them (see `Sound`). They are decoded once at
+//! start-up and mixed through rodio over the music, the way the other
+//! Asciiverse games do it.
 //!
 //! Without an audio device, or with `--mute`, every call does nothing.
 
 use crate::game::Sound;
 use rodio::buffer::SamplesBuffer;
-use rodio::{MixerDeviceSink, Player};
-use std::num::NonZero;
+use rodio::{MixerDeviceSink, Player, Source};
+use std::time::{Duration, Instant};
 
-const SR: u32 = 44_100;
-/// Apple II CPU clock.
-const CLOCK: f64 = 1_022_727.0;
-const LEVEL: f32 = 0.25;
-
-/// One `tone` call: pitch (the 16-bit Y-X loop count) and duration (the
-/// number of speaker flips).
-type Tone = (u16, u8);
-
-/// The tones each effect plays (SOUND.S, DoPlateDown ... DoJawsClash).
-fn tones(s: Sound) -> &'static [Tone] {
-    const SPLAT: &[Tone] = &[(1000, 3)];
-    const CLASH: &[Tone] = &[(15, 50)];
+/// The MP3 for an effect; the loose floor has three.
+fn mp3s(s: Sound) -> &'static [&'static [u8]] {
+    macro_rules! sfx {
+        ($($f:literal),+) => { &[$(include_bytes!(concat!("../assets/sfx/", $f, ".mp3"))),+] };
+    }
     match s {
-        Sound::PlateDown | Sound::GateDown => &[(70, 4)],
-        Sound::PlateUp => &[(90, 4)],
-        Sound::JawsClash => &[(10, 50)],
-        Sound::SwordClash => CLASH,
-        Sound::Splat | Sound::MirrorCrack | Sound::LooseCrash => SPLAT,
-        Sound::SmackWall | Sound::Impaled | Sound::GateSlam => SPLAT,
-        Sound::Footstep => &[(35, 3)],
-        Sound::RaisingExit => &[(40, 6)],
-        Sound::RaisingGate => &[(20, 2)],
-        Sound::LoweringGate => &[(7, 8)],
-        // music cues in the original, not speaker effects
-        Sound::Drink | Sound::Upstairs => &[],
+        Sound::FellToDeath => sfx!("01_Free_fall_land"),
+        Sound::Falling => sfx!("28_Falling_floor_lands"),
+        Sound::TileCrash => sfx!("02_Loose_floor_lands"),
+        Sound::Button => sfx!("19_Floor_button"),
+        Sound::GateClosing => sfx!("04_Gate_coming_down_slow"),
+        Sound::GateOpening => sfx!("05_Gate_rising"),
+        Sound::GateSlam => sfx!("06_Gate_reaches_bottom_clang"),
+        Sound::GateStop => sfx!("07_Gate_stops_at_top"),
+        Sound::Bump => sfx!("08_Bump_into_wall_soft"),
+        Sound::Grab => sfx!("09_Bump_into_wall_hard"),
+        Sound::SwordClash => sfx!("10_Sword_clash"),
+        Sound::SwordMoving => sfx!("11_Stab_air"),
+        Sound::GuardHurt => sfx!("12_Stab_opponent"),
+        Sound::KidHurt => sfx!("13_Stabbed_by_opponent"),
+        Sound::LevelDoorClosing => sfx!("29_Entrance_door_closes"),
+        Sound::LevelDoorSliding => sfx!("30_Exit_door_opening"),
+        Sound::MediumLand => sfx!("14_Medium_landing_oof"),
+        Sound::SoftLand => sfx!("15_Soft_landing"),
+        Sound::Drink => sfx!("31_Drink_potion_glug_glug"),
+        Sound::DrawSword => sfx!("16_Unsheathe_sword"),
+        Sound::LooseShake => sfx!("03_Loose_floor_shakes", "18_Loose_floor_shakes_2", "17_Loose_floor_shakes_3"),
+        Sound::Footstep => sfx!("20_Footsteps"),
+        Sound::SkelAlive => sfx!("21_Bones_leap_to_life"),
+        Sound::Mirror => sfx!("22_Mirror"),
+        Sound::Chomped => sfx!("23_Halved_by_chopper"),
+        Sound::Chomper => sfx!("24_Slicer_blades_clash"),
+        Sound::Spiked => sfx!("33_Spiked_by_spikes"),
+        Sound::Spikes => sfx!("26_Impaled_by_spikes"),
+        Sound::PrincessDoor => sfx!("27_Door_squeak"),
     }
 }
 
-/// CPU cycles between two flips in `tone` for a pitch: the inner loop
-/// (iny, cpy abs, bcc) runs `lo` times, the middle loop `hi` times.
-fn half_period(pitch: u16) -> f64 {
-    let lo = (pitch & 0xff) as f64;
-    let hi = (pitch >> 8) as f64;
-    let inner = 9.0 * lo.max(1.0) - 1.0;
-    let middle = (inner + 2.0 + 9.0) * hi.max(1.0) - 1.0;
-    4.0 + 2.0 + middle + 7.0
-}
-
-/// The speaker waveform for a list of tones.
-fn render(t: &[Tone]) -> Vec<f32> {
-    let mut out = Vec::new();
-    let mut cone = LEVEL;
-    for &(pitch, dur) in t {
-        let n = (half_period(pitch) / CLOCK * SR as f64).max(1.0);
-        let mut acc = 0.0;
-        for _ in 0..dur {
-            cone = -cone;
-            acc += n;
-            while (out.len() as f64) < acc {
-                out.push(cone);
-            }
-        }
-    }
-    // let the cone settle instead of ending on a click
-    let tail = out.len().min(64);
-    let len = out.len();
-    for (i, v) in out[len - tail..].iter_mut().enumerate() {
-        *v *= 1.0 - i as f32 / tail as f32;
-    }
-    out
-}
-
-const ALL: [Sound; 16] = [
-    Sound::Footstep,
-    Sound::SmackWall,
-    Sound::Splat,
-    Sound::Impaled,
-    Sound::GateDown,
+const ALL: [Sound; 29] = [
+    Sound::FellToDeath,
+    Sound::Falling,
+    Sound::TileCrash,
+    Sound::Button,
+    Sound::GateClosing,
+    Sound::GateOpening,
     Sound::GateSlam,
-    Sound::RaisingGate,
-    Sound::LoweringGate,
-    Sound::RaisingExit,
-    Sound::PlateDown,
-    Sound::PlateUp,
-    Sound::LooseCrash,
+    Sound::GateStop,
+    Sound::Bump,
+    Sound::Grab,
     Sound::SwordClash,
-    Sound::JawsClash,
-    Sound::MirrorCrack,
+    Sound::SwordMoving,
+    Sound::GuardHurt,
+    Sound::KidHurt,
+    Sound::LevelDoorClosing,
+    Sound::LevelDoorSliding,
+    Sound::MediumLand,
+    Sound::SoftLand,
     Sound::Drink,
+    Sound::DrawSword,
+    Sound::LooseShake,
+    Sound::Footstep,
+    Sound::SkelAlive,
+    Sound::Mirror,
+    Sound::Chomped,
+    Sound::Chomper,
+    Sound::Spiked,
+    Sound::Spikes,
+    Sound::PrincessDoor,
 ];
+
+fn decode(mp3: &'static [u8]) -> Option<SamplesBuffer> {
+    let d = rodio::Decoder::try_from(std::io::Cursor::new(mp3)).ok()?;
+    let (ch, rate) = (d.channels(), d.sample_rate());
+    let v: Vec<f32> = d.collect();
+    (!v.is_empty()).then(|| SamplesBuffer::new(ch, rate, v))
+}
 
 pub struct Audio {
     // the sink must outlive everything playing on its mixer
     sink: Option<MixerDeviceSink>,
-    bank: Vec<Option<SamplesBuffer>>,
+    /// each effect's decoded takes, in ALL's order
+    bank: Vec<Vec<SamplesBuffer>>,
+    /// the loose floor's last take, so the next one differs (SDLPoP
+    /// last_loose_sound)
+    last_loose: usize,
+    /// a xorshift for picking the loose floor's take (not the game's RNG,
+    /// so sound never changes how a game or the demo plays)
+    rng: u32,
+    /// when the exit door's slide ends: SDLPoP doesn't restart it while
+    /// it plays, so asked for every frame it is heard once
+    sliding_until: Option<Instant>,
     pub muted: bool,
     /// the music track, so a song can be stopped
     music: Option<Player>,
@@ -122,17 +123,12 @@ impl Audio {
             }
         };
         let bank = if sink.is_some() {
-            ALL.iter()
-                .map(|&s| {
-                    let v = render(tones(s));
-                    (!v.is_empty()).then(|| SamplesBuffer::new(NonZero::new(1).unwrap(), NonZero::new(SR).unwrap(), v))
-                })
-                .collect()
+            ALL.iter().map(|&s| mp3s(s).iter().filter_map(|m| decode(m)).collect()).collect()
         } else {
             Vec::new()
         };
         let music = sink.as_ref().map(|s| Player::connect_new(s.mixer()));
-        Audio { sink, bank, muted, music }
+        Audio { sink, bank, last_loose: 0, rng: 0x9e37_79b9, sliding_until: None, muted, music }
     }
 
     /// Start `song`, ending whatever song was playing.
@@ -157,17 +153,39 @@ impl Audio {
         }
     }
 
-    /// PLAYBACK: this frame's sound table.
+    /// PLAYBACK: this frame's sounds, each once.
     pub fn play(&mut self, sounds: &[Sound]) {
         if self.muted {
             return;
         }
         let Some(sink) = &self.sink else { return };
-        for s in sounds {
-            let i = ALL.iter().position(|a| a == s).unwrap_or(0);
-            if let Some(Some(b)) = self.bank.get(i) {
-                sink.mixer().add(b.clone());
+        for (n, &s) in sounds.iter().enumerate() {
+            if sounds[..n].contains(&s) {
+                continue;
             }
+            let i = ALL.iter().position(|&a| a == s).unwrap_or(0);
+            let Some(takes) = self.bank.get(i).filter(|t| !t.is_empty()) else { continue };
+            let take = match s {
+                Sound::LooseShake => {
+                    // one of the other takes at random, as SDLPoP's loose_shake
+                    self.rng ^= self.rng << 13;
+                    self.rng ^= self.rng >> 17;
+                    self.rng ^= self.rng << 5;
+                    let k = takes.len();
+                    self.last_loose = (self.last_loose + 1 + self.rng as usize % (k - 1).max(1)) % k;
+                    &takes[self.last_loose]
+                }
+                _ => &takes[0],
+            };
+            if s == Sound::LevelDoorSliding {
+                let now = Instant::now();
+                if self.sliding_until.is_some_and(|t| now < t) {
+                    continue;
+                }
+                let len = take.total_duration().unwrap_or(Duration::ZERO);
+                self.sliding_until = Some(now + len);
+            }
+            sink.mixer().add(take.clone());
         }
     }
 }
@@ -177,13 +195,12 @@ mod tests {
     use super::*;
 
     #[test]
-    fn tones_have_the_loop_lengths_of_sound_s() {
-        // a footstep: 35 turns of the inner loop between flips, 3 flips
-        let f = render(tones(Sound::Footstep));
-        let ms = f.len() as f64 * 1000.0 / SR as f64;
-        assert!((0.8..1.3).contains(&ms), "footstep {ms} ms");
-        // the splat's pitch 1000 is 3 x 232 turns: a low thud
-        assert!(half_period(1000) > 15.0 * half_period(35));
-        assert!(render(tones(Sound::Drink)).is_empty());
+    fn every_effect_decodes() {
+        for s in ALL {
+            for m in mp3s(s) {
+                let b = decode(m).unwrap_or_else(|| panic!("{s:?} decodes"));
+                assert!(b.total_duration().unwrap() > Duration::from_millis(40), "{s:?}");
+            }
+        }
     }
 }

@@ -139,25 +139,68 @@ pub struct Mob {
     pub level: u8,
 }
 
+/// The DOS version's sound effects, named after SDLPoP's sound ids and
+/// played where SDLPoP plays them.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Sound {
-    Footstep,
-    SmackWall,
-    Splat,
-    Impaled,
-    GateDown,
+    /// 0: crashing into the floor from a fall that kills
+    FellToDeath,
+    /// 1: the scream of a long fall
+    Falling,
+    /// 2: a loose floor landing
+    TileCrash,
+    /// 3: a pressure plate going down
+    Button,
+    /// 4: a gate closing, every fourth step
+    GateClosing,
+    /// 5: a gate opening, every second step
+    GateOpening,
+    /// 6: a gate slammed shut
     GateSlam,
-    RaisingGate,
-    LoweringGate,
-    PlateDown,
-    PlateUp,
-    LooseCrash,
-    Drink,
-    Upstairs,
+    /// 7: a gate stopping at the top, or at the bottom
+    GateStop,
+    /// 8: bumping into a wall
+    Bump,
+    /// 9: catching a ledge while falling
+    Grab,
+    /// 10
     SwordClash,
-    JawsClash,
-    RaisingExit,
-    MirrorCrack,
+    /// 11: a strike at the air
+    SwordMoving,
+    /// 12: a guard hit by the sword
+    GuardHurt,
+    /// 13: the kid hit by the sword or a bad potion
+    KidHurt,
+    /// 14: the level door shut
+    LevelDoorClosing,
+    /// 15: the exit door sliding open
+    LevelDoorSliding,
+    /// 16: a landing that hurts
+    MediumLand,
+    /// 17: a landing on all fours
+    SoftLand,
+    /// 18
+    Drink,
+    /// 19: the kid drawing his sword
+    DrawSword,
+    /// 20 to 22: a loose floor shaking
+    LooseShake,
+    /// 23
+    Footstep,
+    /// 44: the skeleton coming to life
+    SkelAlive,
+    /// 45: jumping through the mirror
+    Mirror,
+    /// 46: cut in half by a slicer
+    Chomped,
+    /// 47: a slicer's jaws meeting
+    Chomper,
+    /// 48: impaled on spikes
+    Spiked,
+    /// 49: spikes springing out
+    Spikes,
+    /// 51: the princess's door, in the vizier's scene
+    PrincessDoor,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -194,6 +237,8 @@ pub struct Game {
     pub rjumpflag: u8,
     pub weightless: u8,
     pub jarabove: i8,
+    /// a long fall's scream has started (SDLPoP is_screaming)
+    pub screaming: bool,
     pub alertguard: bool,
     pub gotsword: bool,
     // fighting (AUTO.S, GAMEEQ.S)
@@ -303,6 +348,7 @@ impl Game {
             rjumpflag: 0,
             weightless: 0,
             jarabove: 0,
+            screaming: false,
             alertguard: false,
             gotsword: false,
             enemy_alert: 0,
@@ -442,6 +488,7 @@ impl Game {
 
     /// STARTKID
     fn startkid(&mut self, n: u8) {
+        self.screaming = false;
         let (mut scrn, mut block, mut face) = self.level.kid_start();
         if n == 3 && self.milestone {
             // past the first gate: start just inside it, loose floor gone
@@ -725,7 +772,7 @@ impl Game {
             self.getreflect();
             self.createshad = false;
             self.ch.id = 1;
-            self.add_sound(Sound::MirrorCrack);
+            self.add_sound(Sound::Mirror);
             self.save_shad();
             self.max_opp_str = self.max_strength;
             self.opp_strength = self.max_strength;
@@ -818,7 +865,7 @@ impl Game {
         if self.ch.life & 0x80 == 0 || self.ch.scrn != 0 {
             return;
         }
-        self.add_sound(Sound::Splat);
+        self.add_sound(Sound::FellToDeath);
         self.decstr(100);
         self.ch.life = 0;
         self.ch.posn = 185;

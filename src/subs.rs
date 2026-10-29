@@ -279,14 +279,13 @@ impl Game {
                             self.alertguard = true;
                         }
                         2 => {
-                            self.add_sound(Sound::SmackWall);
+                            self.add_sound(Sound::Bump);
                             self.alertguard = true;
                         }
                         _ => {}
                     }
                 }
                 op::NEXTLEVEL => {
-                    self.add_sound(Sound::Upstairs);
                     // GoneUpstairs: no music on level 13, the shadow's on 4
                     match self.level.number {
                         13 => {}
@@ -324,6 +323,11 @@ impl Game {
         let (acc, term) = if self.weightless != 0 { (1, 4) } else { (3, 33) };
         let v = self.ch.yvel.wrapping_add(acc);
         self.ch.yvel = if v >= term { term } else { v };
+        // the scream of a long fall (SDLPoP do_fall)
+        if self.ch.yvel >= 31 && !self.screaming {
+            self.add_sound(Sound::Falling);
+            self.screaming = true;
+        }
     }
 
     /// ADDFALL
@@ -371,7 +375,7 @@ impl Game {
             }
             4 => self.inverted = !self.inverted,
             5 => {
-                self.add_sound(Sound::Splat);
+                self.add_sound(Sound::KidHurt);
                 self.chg_kid_str = 0xff;
             }
             _ => {}

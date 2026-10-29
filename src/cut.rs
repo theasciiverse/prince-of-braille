@@ -47,6 +47,8 @@ enum Step {
     Sand,
     /// a white lightning flash
     Flash,
+    /// a sound effect (the DOS scenes have a few)
+    Sfx(Sound),
     StartP(Start),
     StartK(Start),
 }
@@ -111,7 +113,13 @@ impl Game {
                 StartP(Start::P0),
                 Play(2),
                 Song(S::Princess, 8),
-                Play(5),
+                // DOS: a gate closes somewhere and her door creaks before
+                // she turns (SDLPoP pv_scene)
+                Play(1),
+                Sfx(Sound::GateClosing),
+                Play(1),
+                Sfx(Sound::PrincessDoor),
+                Play(3),
                 P(seq::PALERT),
                 Play(9),
                 Speed(7),
@@ -296,6 +304,7 @@ impl Game {
             }
             Step::Glass1(x) => cut.glass = Some(x),
             Step::Sand => cut.sand = 0,
+            Step::Sfx(snd) => self.add_sound(snd),
             Step::Flash => {
                 self.lightning = 5;
                 self.lightcolor = 0xff;

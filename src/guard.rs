@@ -611,6 +611,11 @@ impl Game {
         if p != 154 {
             return;
         }
+        // a strike nobody parries swishes, as in DOS (SDLPoP
+        // check_strike, sound_11_sword_moving)
+        if self.op.posn != 161 && self.op.action != 99 {
+            self.add_sound(Sound::SwordMoving);
+        }
         let a = self.getopdist();
         let near = if self.op.sword >= 2 { STRIKERANGE1 } else { OFFGUARDTHRES };
         if a < near || a >= STRIKERANGE2 {
@@ -664,7 +669,7 @@ impl Game {
                     self.ch.x = self.addcharx(d);
                     self.ch.block_y = self.ch.block_y.wrapping_add(1);
                     self.jumpseq(s::FIGHTFALL);
-                    self.add_sound(Sound::Splat);
+                    self.hurtsound();
                     self.animchar();
                     return;
                 }
@@ -675,8 +680,14 @@ impl Game {
         let by = self.ch.block_y as i8 as i32;
         self.ch.y = FLOOR_Y[(by + 1).clamp(0, 4) as usize];
         self.ch.yvel = 0;
-        self.add_sound(Sound::Splat);
+        self.hurtsound();
         self.animchar();
+    }
+
+    /// The kid's or a guard's cry when the sword hits him (SDLPoP
+    /// hurt_by_sword).
+    fn hurtsound(&mut self) {
+        self.add_sound(if self.ch.id == 0 { Sound::KidHurt } else { Sound::GuardHurt });
     }
 
     /// addsfx: the clash of a blocked strike.
@@ -841,7 +852,7 @@ impl Game {
         }
         self.lightcolor = 0xff;
         self.lightning = 5;
-        self.add_sound(Sound::Splat);
+        self.add_sound(Sound::KidHurt);
         self.decstr(100);
     }
 
@@ -861,7 +872,7 @@ impl Game {
         }
         if self.ch.yvel >= crate::ctrl::OOF_VELOCITY {
             self.decstr(1);
-            self.add_sound(Sound::Splat);
+            self.add_sound(Sound::MediumLand);
         }
         self.ch.yvel = 0;
         log::debug!("bumped off the guard");
@@ -1070,7 +1081,7 @@ impl Game {
                     return self.removegd();
                 }
                 // the skeleton lands on screen 3
-                self.add_sound(Sound::Splat);
+                self.add_sound(Sound::MediumLand);
                 self.shad.x = 0x85;
                 self.shad.block_y = 1;
                 self.shad.face = 0;
@@ -1244,6 +1255,7 @@ impl Game {
         self.ch.face = FACE_LEFT;
         self.jumpseq(s::ARISE);
         self.animchar();
+        self.add_sound(Sound::SkelAlive);
         self.guardprog = SKELPROG;
         self.ch.life = 0xff;
         self.opp_strength = 3;

@@ -418,6 +418,7 @@ impl Game {
         match self.ch.id {
             0 => {
                 self.offguard = false;
+                self.add_sound(Sound::DrawSword);
                 self.jumpseq(s::ENGARDE);
             }
             1 => self.jumpseq(s::ENGARDE),
@@ -822,7 +823,11 @@ impl Game {
                 }
             }
         }
+        self.screaming = false;
         let soft = |g: &mut Game| {
+            if g.ch.id == 0 {
+                g.add_sound(Sound::SoftLand);
+            }
             // guards always land en garde
             if g.ch.id >= 2 || g.ch.sword == 2 {
                 g.ch.sword = 2;
@@ -835,7 +840,7 @@ impl Game {
             if dec {
                 g.decstr(100);
             }
-            g.add_sound(Sound::Splat);
+            g.add_sound(Sound::FellToDeath);
             s::HARDLAND
         };
         let seq = if self.ch.life & 0x80 == 0 {
@@ -849,7 +854,7 @@ impl Game {
                 id if id >= 2 => hard(self, true), // guards can't survive two storeys
                 _ => {
                     if self.decstr(1) {
-                        self.add_sound(Sound::Splat);
+                        self.add_sound(Sound::MediumLand);
                         s::MEDLAND
                     } else {
                         hard(self, false)
@@ -895,6 +900,8 @@ impl Game {
         self.jumpseq(s::FALLHANG);
         self.animchar();
         self.stunned = STUNTIME;
+        self.screaming = false;
+        self.add_sound(Sound::Grab);
         log::debug!("grabbed ledge");
     }
 
@@ -1064,7 +1071,7 @@ impl Game {
         self.ch.x = getblockej(self.rd.bx as i8).wrapping_add(10);
         self.ch.x = self.addcharx(8);
         self.ch.yvel = 0;
-        self.add_sound(Sound::Impaled);
+        self.add_sound(Sound::Spiked);
         self.decstr(100);
         self.jumpseq(s::IMPALE);
         self.animchar();
