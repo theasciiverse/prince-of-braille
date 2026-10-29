@@ -160,7 +160,7 @@ scene, Esc Esc quit.
 state changes and a 500 ms state snapshot. `--dump "R:12 .:6 U:1"` runs
 headless with scripted input and prints frames (`POB_ANSI=1` for colour,
 `POB_PPM_DIR=dir` for raw NTSC frames, `POB_AT=scrn,bx,by[,L|R]` to start
-the kid somewhere else); `tools/ansi2png.py` turns an ANSI dump into PNGs.
+the kid somewhere else, `POB_SCALE=2` for the half-size picture); `tools/ansi2png.py` turns an ANSI dump into PNGs.
 
 **Guards and sword fighting** (2026-10-28): ported from AUTO.S, CTRL.S
 and MISC.S. As in the original every character routine works on one
@@ -237,12 +237,16 @@ before levels 2, 4, 6, 8, 9 and 12 (cut 5 turns ominous when the sand is
 almost out), the tragic ending when time runs out and the happy ending
 on reaching her. Start positions, sequences, SPEED changes and the
 hourglass's state from the time left are as in the source; Space skips a
-scene. `src/room.rs` draws the room: torch flames, twinkling stars, the
-hourglass and its sand, the big white post and the face masks from
-chtable6 at the original places. The room's picture itself (MASTER.S
-`pacProom`, loaded by LoadStage2) is not in the release, so the walls,
-floor, window, torch niches and doorway are our own stand-in laid out
-around those places. Frame pacing is an estimate: PAUSE is about 1.26 ms
+scene. `src/room.rs` draws the room (2026-10-29): the DOS version's
+picture in its own colours, from PrinceJS (Unlicense,
+`tools/dos_room.py` writes `assets/dos/room.bin`): the room, the bed,
+the hourglass and its sand, the stars and the two front pillars, where
+SDLPoP and PrinceJS put them. The characters and torch flames are the
+Apple images over it. DOS x is the Apple's times 8/7 (SDLPoP
+calc_screen_x_coord); the DOS room stands its characters 16 lines lower,
+so the picture is drawn from its line 8 and the characters 8 lines lower
+than the Apple had them. The night sky is lifted just enough to show.
+Frame pacing is an estimate: PAUSE is about 1.26 ms
 per unit of SPEED, the drawing time around it is a guess that makes the
 usual SPEED 12 run at the game's 12 frames a second. `POB_CUT=n` with
 `--dump` starts scene n for testing.
@@ -282,12 +286,13 @@ images now end just left of x (MLAY subtracts the width from XCO): the
 port had drawn every right-facing character 7 pixels too far right since
 the first cut.
 
-**Open, needs an emulator to settle:** facing right into a palace panel
+**Open, for the new renderer (see Direction below):** facing right into a palace panel
 (level 10 screen 1, after the bump) the kid's image lies inside the
 wall's picture and the panel's front piece covers him, so he all but
 vanishes. The bump position matches COLL.S and the mirror rule matches
-MLAY; facing left the kid overlaps a wall by a few pixels only. Compare
-against a real Apple II before changing anything here.
+MLAY; facing left the kid overlaps a wall by a few pixels only. Whatever
+the Apple did, the kid must stay visible: the new renderer draws him over
+the panel.
 
 ## Rights: what Mechner's README actually says
 
@@ -341,6 +346,15 @@ and screen flashes, and the sound effects.
 
 2026-10-29: version 0.9.0. The clock, CROPCHAR, the princess's room
 scenes, the DOS music, the vizier's wait for his music and the attract
-demo. Into the catalog with the demo as its preview. Left: the level 10
-panel question above, and the princess's room picture (PrinceJS has the
-DOS one).
+demo. Into the catalog with the demo as its preview. Then the DOS room
+picture in the princess's room.
+
+**Direction (David, 2026-10-29):** a good terminal Prince of Persia, not
+an Apple II emulation. The source decides how it plays (moves, timing,
+guards, levels); how it looks, sounds and handles is designed for the
+terminal, and where the two disagree the player wins. Bugs in the
+original that hurt play get fixed, as SDLPoP's optional fixes do. Plan,
+in order: the room (done), then a renderer that draws tiles as terminal
+art sized to the window instead of the NTSC 280x192 picture (this also
+settles the level 10 panel), the original's bugs, and controls that
+work from key repeat.

@@ -13,6 +13,7 @@
 
 use crate::apple::{Ink, Screen, SCREEN_H, SCREEN_W};
 use crate::game::{Game, Phase};
+use crate::room::Backdrop;
 use crate::theme::Theme;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
@@ -158,8 +159,8 @@ pub fn cells_needed(scale: i32) -> (u16, u16) {
     ((SCREEN_W / 2 / scale) as u16, (SCREEN_H / 4 / scale) as u16)
 }
 
-/// One dot: is the prince there, and what colour is the dungeon there.
-fn dot(scr: &Screen, col: &[[u8; 3]], x: i32, y: i32, scale: i32) -> (bool, [u8; 3]) {
+/// One dot: is the prince there, and what colour is behind him there.
+fn dot(kids: &[bool], col: &[[u8; 3]], x: i32, y: i32, scale: i32) -> (bool, [u8; 3]) {
     let mut kid = false;
     let mut cs = Vec::with_capacity(4);
     for dy in 0..scale {
@@ -169,15 +170,17 @@ fn dot(scr: &Screen, col: &[[u8; 3]], x: i32, y: i32, scale: i32) -> (bool, [u8;
                 continue;
             }
             let i = (py * SCREEN_W + px) as usize;
-            kid |= matches!(scr.px[i], Ink::Kid | Ink::Guard);
+            kid |= kids[i];
             cs.push(col[i]);
         }
     }
     (kid, mean(cs.into_iter()))
 }
 
-/// Paint the Apple screen into `area` at `scale`.
-pub fn paint_screen(buf: &mut Buffer, area: Rect, scr: &Screen, scale: i32, glyphs: Glyphs, theme: Theme, palace: bool) {
+/// Paint the Apple screen into `area` at `scale`, over the princess's
+/// room's picture in a scene.
+#[allow(clippy::too_many_arguments)]
+pub fn paint_screen(buf: &mut Buffer, area: Rect, scr: &Screen, scale: i32, glyphs: Glyphs, theme: Theme, palace: bool, room: Option<&Backdrop>) {
     let mut col = scr.colors();
     if theme != Theme::Classic {
         let w = SCREEN_W as usize;
@@ -195,6 +198,21 @@ pub fn paint_screen(buf: &mut Buffer, area: Rect, scr: &Screen, scale: i32, glyp
             *c = theme.apply(palace, ink, *c);
         }
     }
+    let mut kids: Vec<bool> = scr.px.iter().map(|p| matches!(p, Ink::Kid | Ink::Guard)).collect();
+    if let Some(room) = room {
+        let w = SCREEN_W as usize;
+        for i in 0..col.len() {
+            if let Some(c) = room.front[i] {
+                col[i] = c;
+                kids[i] = false;
+            } else if scr.px[i] == Ink::None {
+                // the dark outline MASK leaves round a character stays dark
+                let x = i % w;
+                let near = (x > 0 && kids[i - 1]) || (x + 1 < w && kids[i + 1]);
+                col[i] = if near { [0; 3] } else { room.back[i] };
+            }
+        }
+    }
     let (cw, ch) = cells_needed(scale);
     for cy in 0..ch.min(area.height) {
         for cx in 0..cw.min(area.width) {
@@ -203,7 +221,7 @@ pub fn paint_screen(buf: &mut Buffer, area: Rect, scr: &Screen, scale: i32, glyp
             let mut kid_cols = Vec::new();
             for r in 0..4 {
                 for c in 0..2 {
-                    let (k, a) = dot(scr, &col, cx as i32 * 2 + c as i32, cy as i32 * 4 + r as i32, scale);
+                    let (k, a) = dot(&kids, &col, cx as i32 * 2 + c as i32, cy as i32 * 4 + r as i32, scale);
                     if k {
                         kid |= bit(c, r);
                         kid_cols.push(a);

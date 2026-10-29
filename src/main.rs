@@ -205,7 +205,9 @@ fn dump_frames(level: u8, script: &str, theme: theme::Theme) {
         g.place_kid(at.0, at.1, at.2, at.3);
     }
     let mut scr = Screen::default();
-    let (w, h) = render::cells_needed(1);
+    // POB_SCALE=2: the half-size picture, as on a small terminal
+    let scale = std::env::var("POB_SCALE").ok().and_then(|v| v.parse().ok()).filter(|s| *s == 2).unwrap_or(1);
+    let (w, h) = render::cells_needed(scale);
     for tok in script.split_whitespace() {
         let (keys, n) = tok.split_once(':').unwrap_or((tok, "1"));
         let n: u32 = n.parse().unwrap_or(1);
@@ -235,7 +237,7 @@ fn dump_frames(level: u8, script: &str, theme: theme::Theme) {
             let _ = std::fs::write(format!("{dir}/{:03}.ppm", g.ticks), out);
         }
         let mut buf = ratatui::buffer::Buffer::empty(Rect::new(0, 0, w, h + 1));
-        render::paint_screen(&mut buf, Rect::new(0, 0, w, h), &scr, 1, Glyphs::Hybrid, theme, g.level.palace() || g.cut.is_some());
+        render::paint_screen(&mut buf, Rect::new(0, 0, w, h), &scr, scale, Glyphs::Hybrid, theme, g.level.palace() || g.cut.is_some(), g.cut.as_ref().map(room::backdrop).as_ref());
         render::paint_status(&mut buf, Rect::new(0, h, w, 1), &g, "");
         let k = &g.kid;
         println!(
@@ -381,7 +383,7 @@ fn draw(f: &mut ratatui::Frame, app: &mut App, input: &Input) {
     bg::draw(&mut app.screen, &app.game);
     let ox = area.x + (area.width - w) / 2;
     let oy = area.y + (area.height - h - 1) / 2;
-    render::paint_screen(buf, Rect::new(ox, oy, w, h), &app.screen, scale, app.glyphs, app.theme, app.game.level.palace() || app.game.cut.is_some());
+    render::paint_screen(buf, Rect::new(ox, oy, w, h), &app.screen, scale, app.glyphs, app.theme, app.game.level.palace() || app.game.cut.is_some(), app.game.cut.as_ref().map(room::backdrop).as_ref());
     if let Some(c) = app.game.flash() {
         render::paint_flash(buf, Rect::new(ox, oy, w, h), c);
     }

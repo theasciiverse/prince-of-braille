@@ -43,6 +43,7 @@ recognised from the keyboard's repeat.
 
 Prince of Persia is by Jordan Mechner, who released the Apple II source
 code in 2012. The images and level layouts come from that source. The music
-is the DOS version's, from PrinceJS (github.com/oklemenz/PrinceJS).
+and the princess's room are the DOS version's, from PrinceJS
+(github.com/oklemenz/PrinceJS).
 
 Port by Asciiverse, MIT licensed (see LICENSE).

@@ -248,11 +248,6 @@ impl Screen {
     }
 
     #[inline]
-    /// Set one pixel (for pictures drawn here rather than from images).
-    pub fn plot(&mut self, x: i32, y: i32, v: Ink, pal: bool) {
-        self.set(x, y, v, pal);
-    }
-
     fn set(&mut self, x: i32, y: i32, v: Ink, pal: bool) {
         if (0..SCREEN_W).contains(&x) && (0..SCREEN_H).contains(&y) {
             let i = (y * SCREEN_W + x) as usize;
