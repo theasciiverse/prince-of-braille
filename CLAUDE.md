@@ -181,8 +181,10 @@ blocks, stabs, deaths); the 500 ms debug snapshot includes the opponent.
 - ADDGUARD calls getgdstrength before it sets `guardprog` for the new
   guard, so a guard's extra strength (program 4 only) comes from the
   previous guard's program. Kept as the original has it.
-- The vizier waits for his music (SongCue) before he draws. There is no
-  music yet, so he draws as soon as he sees you.
+- The vizier waits for his music (AUTO.S: SongCue) before he goes en
+  garde. The Apple froze the game while a song played; here music plays
+  over the game, so he waits 28 frames (2.33 s) after his song starts,
+  as SDLPoP's meet_Jaffar does.
 - RND here is a xorshift, not the original generator: the same
   probabilities, a different sequence.
 - Level 7 starts with the kid dropped into screen 1 from screen 17

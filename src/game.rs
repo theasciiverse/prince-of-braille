@@ -267,6 +267,10 @@ pub struct Game {
     pub song_start: Option<crate::music::Song>,
     /// level 13's meeting music has played
     pub met_jaffar: bool,
+    /// frames the vizier waits after his music starts before he goes en
+    /// garde (SDLPoP's guard_notice_timer; the Apple froze the game while a
+    /// song played, AUTO.S waits for SongCue to clear)
+    pub jaffar_wait: u8,
     pub rng: u32,
     pub ticks: u64,
     /// last potion drunk (REMOVEOBJ lastpotion; 0xff = the sword)
@@ -349,6 +353,7 @@ impl Game {
             cut: None,
             song_start: None,
             met_jaffar: false,
+            jaffar_wait: 0,
             rng: 0x1234_5678,
             ticks: 0,
             potion: 0,
@@ -398,6 +403,8 @@ impl Game {
         self.enemy_alert = 0;
         self.createshad = false;
         self.heroic = false;
+        self.met_jaffar = false;
+        self.jaffar_wait = 0;
         self.chg_kid_str = 0;
         self.chg_opp_str = 0;
         self.opp_strength = 0;
@@ -571,6 +578,7 @@ impl Game {
         if self.lightning > 0 {
             self.lightning -= 1;
         }
+        self.jaffar_wait = self.jaffar_wait.saturating_sub(1);
         if let Some((_, t)) = &mut self.message {
             *t = t.saturating_sub(1);
             if *t == 0 {

@@ -359,6 +359,10 @@ impl Game {
         if self.enemy_alert == 0 {
             return;
         }
+        // the vizier only: wait for his music
+        if self.level.number == 13 && self.jaffar_wait > 0 {
+            return;
+        }
         log::debug!("guard goes en garde, dist {}", a as i8);
         self.cmd_engarde();
     }
@@ -1146,6 +1150,8 @@ impl Game {
         if self.level.number == 13 && self.ch.life & 0x80 != 0 && !self.met_jaffar {
             self.met_jaffar = true;
             self.cuesong(crate::music::Song::MeetJaffar);
+            // as SDLPoP's meet_Jaffar: 28 frames, 2.33 seconds
+            self.jaffar_wait = 28;
         }
         self.save_shad();
     }
@@ -1224,6 +1230,31 @@ mod tests {
         run(&mut g, LEFT, 36);
         run(&mut g, NONE, 10);
         g
+    }
+
+    /// Level 13: the vizier hears his music before he goes en garde.
+    #[test]
+    fn vizier_waits_for_his_music() {
+        let mut g = Game::new(13);
+        let scrn = (1..=24u8).find(|&s| g.level.gd(gd::BLOCK, s) < 30).expect("a guard on level 13");
+        let b = g.level.gd(gd::BLOCK, scrn);
+        let (gx, gy) = (b % 10, b / 10);
+        let (kx, face) = if gx >= 5 { (gx - 4, FACE_RIGHT) } else { (gx + 4, FACE_LEFT) };
+        g.place_kid(scrn, kx, gy, face);
+        // entering the screen places him and cues the music
+        let mut met = g.met_jaffar.then_some(0);
+        for t in 1..120u32 {
+            g.tick(NONE);
+            if met.is_none() && g.met_jaffar {
+                met = Some(t);
+            }
+            if g.shad.sword >= 2 {
+                let m = met.expect("music cued before en garde");
+                assert!(t - m >= 28, "en garde {} frames after the music", t - m);
+                return;
+            }
+        }
+        panic!("the vizier never went en garde (met {met:?})");
     }
 
     #[test]
