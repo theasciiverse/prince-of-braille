@@ -1,6 +1,6 @@
 [package]
 name = "prince-of-braille"
-version = "0.10.0"
+version = "0.10.1"
 edition = "2021"
 license = "MIT"
 description = "Asciiverse restoration of Jordan Mechner's Apple II Prince of Persia (1989), drawn in Braille dots"
@@ -15,7 +15,7 @@ log = "0.4"
 env_logger = "0.11"
 png = "0.17"
 rodio = { version = "0.22", default-features = false, features = ["playback", "mp3"] }
-gilrs = { version = "0.11", optional = true }
+gilrs = { version = "0.11", optional = true, default-features = false, features = ["xinput"] }
 
 [features]
 default = ["gamepad"]
